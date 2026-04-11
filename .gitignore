@@ -36,3 +36,18 @@ scripts/training_masks/
 
 # Claude Code
 .claude/
+
+# Local Netlify folder
+.netlify
+
+# Test / review artifacts
+review-*.png
+.playwright-mcp/
+test-results/
+playwright-report/
+
+# Local scratch / brand assets not part of the build
+colors.txt
+deno.lock
+brand-kit/
+qr.txt

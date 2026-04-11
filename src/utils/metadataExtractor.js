@@ -35,6 +35,7 @@ function readUint32(view, offset, littleEndian) {
 function readString(view, offset, length) {
   let str = '';
   for (let i = 0; i < length; i++) {
+    if (offset + i >= view.byteLength) break;
     const c = view.getUint8(offset + i);
     if (c === 0) break;
     str += String.fromCharCode(c);
@@ -72,7 +73,9 @@ function readIFD(view, tiffStart, ifdOffset, littleEndian, tagMap) {
           result[tagName] = readString(view, valueOffset, strLen);
         } else {
           const ptr = readUint32(view, valueOffset, littleEndian);
-          result[tagName] = readString(view, tiffStart + ptr, strLen);
+          if (tiffStart + ptr + strLen <= view.byteLength) {
+            result[tagName] = readString(view, tiffStart + ptr, strLen);
+          }
         }
       } else if (type === 3) {
         result[tagName] = readUint16(view, valueOffset, littleEndian);
@@ -81,6 +84,8 @@ function readIFD(view, tiffStart, ifdOffset, littleEndian, tagMap) {
       } else if (type === 5) {
         // RATIONAL — value is pointer to num/den pair(s)
         const ptr = readUint32(view, valueOffset, littleEndian);
+        const end = tiffStart + ptr + count * 8;
+        if (end > view.byteLength) continue;
         if (count === 1) {
           result[tagName] = readRational(view, tiffStart + ptr, littleEndian);
         } else {
@@ -108,6 +113,17 @@ function dmsToDecimal(dms, ref) {
   return Math.round(decimal * 1000000) / 1000000;
 }
 
+// Single source of truth for the "we can't read metadata from this file
+// type, but it'll still be stripped on export" message. Previously the
+// text was duplicated three times (PNG/HEIC/WebP) with only the format
+// name swapped — easy to drift if anyone copy-edits one. Callers must
+// pass a format name (e.g. 'PNG'). For the unknown-format case use the
+// distinct `unknownFormatNote` below.
+function unreadableNote(format) {
+  return `Detailed metadata inspection is not available for ${format} files, but all metadata is removed on export.`;
+}
+const UNKNOWN_FORMAT_NOTE = 'This image format could not be identified, but all metadata is removed on export.';
+
 /**
  * Extract EXIF metadata from a File or ArrayBuffer.
  * Returns structured metadata object or null if no EXIF found.
@@ -119,11 +135,22 @@ export async function extractMetadata(file) {
   // Check for JPEG SOI marker
   if (view.byteLength < 4) return null;
   if (view.getUint16(0) !== 0xFFD8) {
-    // Not a JPEG — check for PNG
+    // Not a JPEG — detect other formats
     if (view.getUint32(0) === 0x89504E47) {
-      return { format: 'PNG', note: 'PNG files may contain tEXt metadata chunks — stripped on re-encode' };
+      return { format: 'PNG', readable: false, note: unreadableNote('PNG') };
     }
-    return { format: 'Unknown' };
+    // HEIC/HEIF: starts with ftyp box containing 'heic', 'heix', 'hevc', 'mif1'
+    if (view.byteLength >= 12 && readString(view, 4, 4) === 'ftyp') {
+      const brand = readString(view, 8, 4);
+      if (['heic', 'heix', 'hevc', 'mif1', 'msf1', 'hevx'].includes(brand)) {
+        return { format: 'HEIC', readable: false, note: unreadableNote('HEIC') };
+      }
+    }
+    // WebP: starts with "RIFF" ... "WEBP"
+    if (view.byteLength >= 12 && readString(view, 0, 4) === 'RIFF' && readString(view, 8, 4) === 'WEBP') {
+      return { format: 'WebP', readable: false, note: unreadableNote('WebP') };
+    }
+    return { format: null, readable: false, note: UNKNOWN_FORMAT_NOTE };
   }
 
   // Find APP1 (EXIF) marker
@@ -131,13 +158,13 @@ export async function extractMetadata(file) {
   while (offset < view.byteLength - 4) {
     const marker = view.getUint16(offset);
     if (marker === 0xFFE1) break; // APP1
-    if ((marker & 0xFF00) !== 0xFF00) return { format: 'JPEG', note: 'No EXIF data found' };
+    if ((marker & 0xFF00) !== 0xFF00) return { format: 'JPEG', readable: true };
     const segLen = view.getUint16(offset + 2);
     offset += 2 + segLen;
   }
 
   if (offset >= view.byteLength - 4) {
-    return { format: 'JPEG', note: 'No EXIF data found' };
+    return { format: 'JPEG', readable: true };
   }
 
   // APP1 found
@@ -146,7 +173,7 @@ export async function extractMetadata(file) {
 
   // Check "Exif\0\0"
   if (readString(view, exifStart, 4) !== 'Exif') {
-    return { format: 'JPEG', note: 'APP1 marker found but not EXIF' };
+    return { format: 'JPEG', readable: true };
   }
 
   const tiffStart = exifStart + 6;
@@ -155,7 +182,7 @@ export async function extractMetadata(file) {
 
   // Verify TIFF magic
   if (readUint16(view, tiffStart + 2, littleEndian) !== 0x002A) {
-    return { format: 'JPEG', note: 'Invalid TIFF header' };
+    return { format: 'JPEG', readable: true };
   }
 
   const ifd0Offset = readUint32(view, tiffStart + 4, littleEndian);
@@ -196,6 +223,7 @@ export async function extractMetadata(file) {
   // Build result
   const result = {
     format: 'JPEG',
+    readable: true,
     camera: [ifd0.make, ifd0.model].filter(Boolean).join(' ') || null,
     software: ifd0.software || null,
     dateTime: exifIFD.dateTimeOriginal || exifIFD.dateTimeDigitized || ifd0.dateTime || null,

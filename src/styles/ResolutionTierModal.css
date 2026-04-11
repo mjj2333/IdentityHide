@@ -1,0 +1,193 @@
+/* Resolution Tier Modal — shown after upload, before pipeline runs */
+
+.tier-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay-backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-overlay);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  padding: 16px;
+  animation: tier-backdrop-in var(--dur-fast) ease-out;
+}
+
+.tier-modal {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--modal-pad-md);
+  max-width: 720px;
+  width: 100%;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  animation: tier-modal-in var(--dur-base) cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes tier-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes tier-modal-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.tier-modal-title {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+.tier-modal-subtitle {
+  margin: 0 0 20px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+.tier-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.tier-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px;
+  background: var(--bg-surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  font: inherit;
+  transition:
+    border-color var(--dur-fast),
+    background var(--dur-fast),
+    transform var(--dur-fast);
+  min-height: 120px;
+}
+
+.tier-card:hover:not(.tier-card-disabled) {
+  background: var(--bg-hover);
+  transform: translateY(-1px);
+}
+
+.tier-card:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.tier-card-selected {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.tier-card-selected:hover {
+  background: var(--accent-dim);
+}
+
+.tier-card-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tier-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+}
+
+.tier-card-label {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+
+.tier-card-mp {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 2px 6px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.tier-card-selected .tier-card-mp {
+  color: var(--accent);
+  background: var(--bg-surface);
+}
+
+.tier-card-dims {
+  font-size: 0.75rem;
+  font-family: var(--mono);
+  color: var(--text-dim);
+}
+
+.tier-card-desc {
+  font-size: 0.8rem;
+  line-height: 1.3;
+  color: var(--text-dim);
+  margin-top: auto;
+}
+
+.tier-card-time {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.tier-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+/* Mobile: 2×2 grid with larger tap targets */
+@media (max-width: 640px) {
+  .tier-modal {
+    padding: var(--modal-pad-sm);
+  }
+  .tier-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .tier-card {
+    min-height: 110px;
+    padding: 12px;
+  }
+  .tier-modal-title {
+    font-size: 1rem;
+  }
+}
+
+/* Very small phones: stack single column so everything stays readable */
+@media (max-width: 360px) {
+  .tier-grid {
+    grid-template-columns: 1fr;
+  }
+  .tier-card {
+    min-height: auto;
+  }
+}
+
+/* Respect reduced-motion: no entrance animations, no hover lift */
+@media (prefers-reduced-motion: reduce) {
+  .tier-backdrop,
+  .tier-modal {
+    animation: none;
+  }
+  .tier-card:hover:not(.tier-card-disabled) {
+    transform: none;
+  }
+}

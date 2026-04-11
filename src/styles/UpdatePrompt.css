@@ -1,0 +1,81 @@
+.update-prompt {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 14px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  z-index: var(--z-toast);
+  max-width: calc(100vw - 32px);
+  animation: update-prompt-enter var(--dur-base) ease-out;
+}
+
+.update-prompt-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.update-prompt-body {
+  font-size: 0.9rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.update-prompt-reload {
+  /* Match the other btn-sm primaries used elsewhere; no extra styling needed. */
+  flex-shrink: 0;
+}
+
+.update-prompt-dismiss {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.4rem;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-base) ease, background var(--dur-base) ease;
+}
+.update-prompt-dismiss:hover {
+  color: var(--text);
+  background: var(--bg-surface);
+}
+.update-prompt-dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@keyframes update-prompt-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 16px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-prompt {
+    animation: none;
+  }
+}
+
+/* Narrow screens: drop the "New version available" text to leave room for
+   the Reload button without wrapping. The icon still conveys the meaning,
+   and the button label is self-explanatory. */
+@media (max-width: 380px) {
+  .update-prompt-body {
+    display: none;
+  }
+}

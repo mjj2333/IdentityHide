@@ -3,6 +3,16 @@
  * Much faster than true Gaussian for large radii.
  */
 
+const MAX_BLUR_RADIUS = 254;
+const PIXELATE_MIN_BLOCK = 2;
+const BLACKBAR_HEIGHT_MIN = 0.08;
+const BLACKBAR_HEIGHT_RANGE = 0.35;
+const BLACKBAR_EYE_Y_RATIO = 0.28;
+const BLACKBAR_X_EXTEND = 0.05;
+const BLACKBAR_WIDTH_EXTEND = 1.1;
+const FACE_BOX_EXPAND = 1.1;
+const MASK_ALPHA_THRESHOLD = 128;
+
 const MUL_TABLE = [
   512,512,456,512,328,456,335,512,405,328,271,456,388,335,292,512,
   454,405,364,328,298,271,496,456,420,388,360,335,312,292,273,512,
@@ -43,7 +53,7 @@ const SHG_TABLE = [
 
 export function stackBlur(imageData, radius) {
   if (radius < 1) return imageData;
-  radius = Math.min(radius, 254);
+  radius = Math.min(radius, MAX_BLUR_RADIUS);
 
   const { width, height } = imageData;
   const pixels = imageData.data;
@@ -268,10 +278,24 @@ export function applyMaskedBlur(sourceCanvas, maskCanvas, mode = 'gaussian', str
   // Draw original
   outCtx.drawImage(sourceCanvas, 0, 0);
 
-  // Black bar mode: draw rectangles across the eye region of each face
+  // Black bar mode. Merge detection bars into the mask-alpha pipeline instead
+  // of drawing them directly on outCanvas, so the pixel blend below operates
+  // on TRUE original pixels. Drawing bars with fillRect and then reading the
+  // canvas back would leave manual brush strokes compositing against already
+  // blackened pixels — visually harmless today, but semantically wrong and
+  // fragile to any future change in the blend formula.
   if (mode === 'blackbar') {
+    const combinedMaskCanvas = document.createElement('canvas');
+    combinedMaskCanvas.width = width;
+    combinedMaskCanvas.height = height;
+    const combinedMaskCtx = combinedMaskCanvas.getContext('2d');
+
+    // Start with the manual brush mask (alpha channel carries the paint).
+    combinedMaskCtx.drawImage(maskCanvas, 0, 0);
+
+    // Union detection bars into the mask at alpha 255.
     if (detections && detections.length > 0) {
-      outCtx.fillStyle = '#000000';
+      combinedMaskCtx.fillStyle = 'rgba(255, 255, 255, 1)';
       for (const det of detections) {
         if (det.type === 'tattoo') continue;
         const x = det.topLeft[0];
@@ -281,18 +305,36 @@ export function applyMaskedBlur(sourceCanvas, maskCanvas, mode = 'gaussian', str
 
         // Bar spans full face width, centered on eye region (~25-45% from top)
         // Strength controls bar height: 5=thin, 60=covers most of face
-        const barHeightRatio = 0.08 + (strength / 60) * 0.35; // 8% to 43% of face height
+        const barHeightRatio = BLACKBAR_HEIGHT_MIN + (strength / 60) * BLACKBAR_HEIGHT_RANGE;
         const barH = fh * barHeightRatio;
-        const eyeY = y + fh * 0.28; // eyes are roughly 28% down from top of face bbox
+        const eyeY = y + fh * BLACKBAR_EYE_Y_RATIO;
         const barY = eyeY - barH / 2;
 
         // Extend bar slightly past face edges for the classic look
-        const barX = x - fw * 0.05;
-        const barW = fw * 1.1;
+        const barX = x - fw * BLACKBAR_X_EXTEND;
+        const barW = fw * BLACKBAR_WIDTH_EXTEND;
 
-        outCtx.fillRect(barX, barY, barW, barH);
+        combinedMaskCtx.fillRect(barX, barY, barW, barH);
       }
     }
+
+    // Read the ORIGINAL pixels (outCanvas still only has the source image
+    // drawn on it) and the combined mask, then blend toward black per pixel.
+    const outData = outCtx.getImageData(0, 0, width, height);
+    const maskData = combinedMaskCtx.getImageData(0, 0, width, height);
+    const od = outData.data;
+    const md = maskData.data;
+    for (let i = 0; i < od.length; i += 4) {
+      const a = md[i + 3];
+      if (a > 0) {
+        const t = a / 255;
+        od[i] = Math.round(od[i] * (1 - t));
+        od[i + 1] = Math.round(od[i + 1] * (1 - t));
+        od[i + 2] = Math.round(od[i + 2] * (1 - t));
+      }
+    }
+    outCtx.putImageData(outData, 0, 0);
+
     return outCanvas;
   }
 
@@ -309,7 +351,7 @@ export function applyMaskedBlur(sourceCanvas, maskCanvas, mode = 'gaussian', str
   if (mode === 'gaussian') {
     stackBlur(blurData, Math.round(strength));
   } else if (mode === 'pixelate') {
-    pixelate(blurData, Math.max(2, Math.round(strength / 2)));
+    pixelate(blurData, Math.max(PIXELATE_MIN_BLOCK, Math.round(strength / 2)));
   }
 
   // Read mask
@@ -323,7 +365,7 @@ export function applyMaskedBlur(sourceCanvas, maskCanvas, mode = 'gaussian', str
 
   for (let i = 0; i < out.length; i += 4) {
     const maskAlpha = mask[i + 3];
-    if (maskAlpha > 128) {
+    if (maskAlpha > 0) {
       // Blend based on mask alpha for soft edges
       const t = maskAlpha / 255;
       out[i] = Math.round(out[i] * (1 - t) + blur[i] * t);

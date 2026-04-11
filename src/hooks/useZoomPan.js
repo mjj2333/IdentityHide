@@ -1,18 +1,25 @@
 /**
- * Hook for pinch-to-zoom and pan on the mask editor canvas.
+ * Hook for pinch-to-zoom and pan on canvases.
+ * Computes a fitScale so the image always fits the container at scale=1.
  * Supports touch pinch, scroll wheel, and double-tap to reset.
  */
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 
-const MIN_SCALE = 1;
-const MAX_SCALE = 5;
+const MIN_SCALE = 0.5;
+const MAX_SCALE = 10;
+const WHEEL_ZOOM_IN = 1.1;
+const WHEEL_ZOOM_OUT = 0.9;
+const DOUBLE_TAP_TIMEOUT = 300;
+const TOUCH_SETTLE_DELAY = 50;
 
-export function useZoomPan(imageWidth, imageHeight, containerRef) {
+export function useZoomPan(imageWidth, imageHeight, containerRef, { oneFingerPan = false } = {}) {
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const [fitScale, setFitScale] = useState(null);
 
   const scaleRef = useRef(1);
   scaleRef.current = scale;
+  const fitScaleRef = useRef(null);
 
   const isPanning = useRef(false);
   const lastPinchDist = useRef(0);
@@ -20,17 +27,54 @@ export function useZoomPan(imageWidth, imageHeight, containerRef) {
   const lastPanPos = useRef({ x: 0, y: 0 });
   const doubleTapTime = useRef(0);
 
+  // Compute fitScale: the CSS scale that makes the image exactly fit the container.
+  // Uses useLayoutEffect to avoid a flash of the full-size canvas before paint.
+  useLayoutEffect(() => {
+    const el = containerRef?.current;
+    if (!el || imageWidth < 2 || imageHeight < 2) return;
+
+    const compute = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      const fs = Math.min(rect.width / imageWidth, rect.height / imageHeight);
+      setFitScale(fs);
+      fitScaleRef.current = fs;
+      // Re-clamp translate for new dimensions
+      setTranslate(prev => {
+        const combined = fs * scaleRef.current;
+        const visW = imageWidth * combined;
+        const visH = imageHeight * combined;
+        if (visW <= rect.width && visH <= rect.height) return { x: 0, y: 0 };
+        const maxTx = Math.max(0, (visW - rect.width) / 2);
+        const maxTy = Math.max(0, (visH - rect.height) / 2);
+        return {
+          x: Math.max(-maxTx, Math.min(maxTx, prev.x)),
+          y: Math.max(-maxTy, Math.min(maxTy, prev.y)),
+        };
+      });
+    };
+
+    compute();
+    const observer = new ResizeObserver(compute);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [containerRef, imageWidth, imageHeight]);
+
   const clampTranslate = useCallback((tx, ty, s, containerEl) => {
-    if (s <= 1) return { x: 0, y: 0 };
+    const fs = fitScaleRef.current || 1;
+    const combined = fs * s;
     if (!containerEl) return { x: tx, y: ty };
     const rect = containerEl.getBoundingClientRect();
-    const maxTx = (rect.width * (s - 1)) / 2;
-    const maxTy = (rect.height * (s - 1)) / 2;
+    const visW = imageWidth * combined;
+    const visH = imageHeight * combined;
+    if (visW <= rect.width && visH <= rect.height) return { x: 0, y: 0 };
+    const maxTx = Math.max(0, (visW - rect.width) / 2);
+    const maxTy = Math.max(0, (visH - rect.height) / 2);
     return {
       x: Math.max(-maxTx, Math.min(maxTx, tx)),
       y: Math.max(-maxTy, Math.min(maxTy, ty)),
     };
-  }, []);
+  }, [imageWidth, imageHeight]);
 
   const resetZoom = useCallback(() => {
     setScale(1);
@@ -38,20 +82,18 @@ export function useZoomPan(imageWidth, imageHeight, containerRef) {
     isPanning.current = false;
   }, []);
 
-  // --- Scroll wheel: zoom when at 1x or Ctrl held, pan when zoomed ---
+  // --- Scroll wheel: zoom when at fit or Ctrl held, pan when zoomed in ---
   const handleWheel = useCallback((e) => {
     e.preventDefault();
 
     if (e.ctrlKey || scaleRef.current <= 1) {
-      // Zoom in/out
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      const delta = e.deltaY > 0 ? WHEEL_ZOOM_OUT : WHEEL_ZOOM_IN;
       setScale(prev => {
         const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, prev * delta));
         if (next <= 1) setTranslate({ x: 0, y: 0 });
         return next;
       });
     } else {
-      // Pan when zoomed — deltaY for vertical, deltaX for horizontal
       setTranslate(prev => {
         const container = containerRef?.current;
         return clampTranslate(
@@ -64,7 +106,6 @@ export function useZoomPan(imageWidth, imageHeight, containerRef) {
     }
   }, [clampTranslate, containerRef]);
 
-  // Attach wheel listener natively with { passive: false } to allow preventDefault
   useEffect(() => {
     const el = containerRef?.current;
     if (!el) return;
@@ -86,26 +127,26 @@ export function useZoomPan(imageWidth, imageHeight, containerRef) {
 
   const handleTouchStart = useCallback((e) => {
     if (e.touches.length === 2) {
-      // Begin pinch
       isPanning.current = true;
       lastPinchDist.current = getTouchDist(e.touches[0], e.touches[1]);
       lastPinchMid.current = getTouchMid(e.touches[0], e.touches[1]);
       e.preventDefault();
     } else if (e.touches.length === 1) {
-      // Double-tap detection
       const now = Date.now();
-      if (now - doubleTapTime.current < 300) {
+      if (now - doubleTapTime.current < DOUBLE_TAP_TIMEOUT) {
         resetZoom();
         e.preventDefault();
       }
       doubleTapTime.current = now;
 
-      // Pan when zoomed
-      if (scale > 1) {
+      if (scaleRef.current > 1) {
         lastPanPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        if (oneFingerPan) {
+          isPanning.current = true;
+        }
       }
     }
-  }, [scale, resetZoom]);
+  }, [resetZoom, oneFingerPan]);
 
   const handleTouchMove = useCallback((e) => {
     if (e.touches.length === 2) {
@@ -123,40 +164,48 @@ export function useZoomPan(imageWidth, imageHeight, containerRef) {
           return next;
         });
 
-        // Pan to keep midpoint stationary
         const dx = mid.x - lastPinchMid.current.x;
         const dy = mid.y - lastPinchMid.current.y;
         setTranslate(prev => {
           const container = e.currentTarget;
-          return clampTranslate(prev.x + dx, prev.y + dy, scale, container);
+          return clampTranslate(prev.x + dx, prev.y + dy, scaleRef.current, container);
         });
       }
 
       lastPinchDist.current = dist;
       lastPinchMid.current = mid;
+    } else if (e.touches.length === 1 && oneFingerPan && isPanning.current) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - lastPanPos.current.x;
+      const dy = e.touches[0].clientY - lastPanPos.current.y;
+      lastPanPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      setTranslate(prev => {
+        const container = e.currentTarget;
+        return clampTranslate(prev.x + dx, prev.y + dy, scaleRef.current, container);
+      });
     }
-  }, [scale, clampTranslate]);
+  }, [scale, clampTranslate, oneFingerPan]);
 
   const handleTouchEnd = useCallback((e) => {
     if (e.touches.length < 2) {
       lastPinchDist.current = 0;
-      // Small delay before allowing paint again
-      setTimeout(() => { isPanning.current = false; }, 50);
+      setTimeout(() => { isPanning.current = false; }, TOUCH_SETTLE_DELAY);
     }
   }, []);
 
-  // --- Transform CSS ---
+  // --- Transform CSS — includes fitScale so the image fits the container ---
   const getTransformStyle = useCallback(() => {
-    return `translate(${translate.x}px, ${translate.y}px) scale(${scale})`;
-  }, [scale, translate]);
+    // Before fitScale is measured, use 0 to hide canvas (avoids full-size flash)
+    const fs = fitScale != null ? fitScale : 0;
+    return `translate(${translate.x}px, ${translate.y}px) scale(${fs * scale})`;
+  }, [scale, translate, fitScale]);
 
   // --- Coordinate mapping: screen -> image space, accounting for zoom ---
   const screenToImage = useCallback((clientX, clientY, canvasEl) => {
     if (!canvasEl) return { x: 0, y: 0 };
     const rect = canvasEl.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
 
-    // The canvas element is CSS-scaled by object-fit:contain inside the zoom wrapper.
-    // rect already reflects the zoomed/translated bounding box.
     const scaleX = imageWidth / rect.width;
     const scaleY = imageHeight / rect.height;
 
@@ -168,6 +217,7 @@ export function useZoomPan(imageWidth, imageHeight, containerRef) {
 
   return {
     scale,
+    fitScale,
     isPanning,
     translate,
     getTransformStyle,

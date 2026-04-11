@@ -2,35 +2,45 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>PixelShield — Protect Identities in Photos</title>
-    <meta name="description" content="Auto-detect faces, strip metadata, and blur sensitive areas — all on-device, no uploads." />
-    <meta name="theme-color" content="#0a0a0f" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>IdentityHide — Protect Identities in Photos</title>
+    <meta name="description" content="IdentityHide protects identities in photos — blur faces, remove tattoos, and strip location metadata in your browser before you share." />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="PixelShield" />
+    <meta name="apple-mobile-web-app-title" content="IdentityHide" />
     <link rel="manifest" href="/manifest.json" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <meta property="og:title" content="IdentityHide — Protect Identities in Photos" />
+    <meta property="og:description" content="IdentityHide protects identities in photos — blur faces, remove tattoos, and strip location metadata in your browser before you share." />
+    <meta property="og:image" content="https://identity-hide.com/og-image.png" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://identity-hide.com/og-image.png" />
+    <meta name="google-adsense-account" content="ca-pub-5282264563005092">
   </head>
-  <body>
+  <body style="margin:0;">
     <div id="root"></div>
+    <!-- AppLixir rewarded video ads -->
+    <div id="applixir-ad"></div>
     <script>
-      // Unregister any service workers that may be caching old content
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(function(registrations) {
-          registrations.forEach(function(reg) {
-            reg.unregister();
-            console.log('UNREGISTERED SERVICE WORKER:', reg.scope);
-          });
-          if (registrations.length > 0) {
-            console.log('Service workers cleared - reloading...');
-            location.reload();
-          }
-        });
+      // GPP (Global Privacy Platform) stub — AppLixir's ad stack expects
+      // this to exist. Without it the SDK throws a TypeError.
+      if (typeof window.__gpp !== 'function') {
+        window.__gpp = function() {};
       }
-      // Cache-bust timestamp to confirm fresh load
-      console.log('=== INDEX.HTML LOADED AT:', new Date().toISOString(), '===');
+    </script>
+    <script type="text/javascript" src="https://cdn.applixir.com/applixir.app.v6.0.1.js"></script>
+    <script>
+      // Service worker registration lives in src/hooks/usePwaUpdate.js so the
+      // React app can also detect new versions and prompt the user to reload.
+      // This inline script now only captures the install prompt early, so the
+      // React InstallPrompt component never misses the event.
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        window.__pwaInstallPrompt = e;
+      });
     </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>

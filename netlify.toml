@@ -1,0 +1,79 @@
+[build]
+  publish = "dist"
+  command = "npm run build"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/favicon.ico"
+  to = "/favicon.png"
+  status = 200
+
+[[redirects]]
+  from = "/admin"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/feedback"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/terms"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/privacy"
+  to = "/index.html"
+  status = 200
+
+# Security headers for all pages
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=()"
+    # HSTS: force HTTPS for 1 year. Netlify already redirects http→https; this
+    # hardens against downgrade attacks after the first visit.
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    # CSP notes:
+    # - 'unsafe-inline' for script-src is required by the two inline <script>
+    #   blocks in index.html (SW registration + beforeinstallprompt capture).
+    # - 'wasm-unsafe-eval' is required by TensorFlow.js / blazeface.
+    # - 'unsafe-inline' for style-src is required by React's inline style props.
+    # - connect-src allows Supabase via Netlify functions (self), the ComfyUI
+    #   tunnel at identity-hide.com, the tfhub.dev / Google Cloud Storage
+    #   hosts that BlazeFace fetches its model weights from on first use, and
+    #   the Sentry ingest endpoint for our project's org (o4511186341658625).
+    # - img-src allows data: and blob: for canvas exports and detection previews.
+    # - AppLixir: cdn.applixir.com (SDK), *.applixir.com (ad serving),
+    #   frame-src allows the ad player iframe. May need expansion for
+    #   production ad network domains (Google AdX, etc.).
+    # CSP removed — Google IMA (used by AppLixir ad SDK) dynamically
+    # loads scripts via eval/blob URLs from many domains, making it
+    # incompatible with Content-Security-Policy. Other security headers
+    # (HSTS, X-Frame-Options, etc.) remain active.
+
+# Cache ONNX models for 1 year — they're versioned by filename
+[[headers]]
+  for = "/models/*.onnx"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Cache WASM files for 1 year
+[[headers]]
+  for = "/assets/*.wasm"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Hashed JS/CSS assets — cache forever
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

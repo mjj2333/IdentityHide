@@ -1,26 +1,33 @@
-const CACHE_NAME = 'pixelshield-v1';
-
-// App shell files to cache
-const APP_SHELL = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-];
+// Service worker — enables PWA installability, offline fallback, and asset caching.
+// CACHE_VERSION is replaced at build time by the vite plugin in vite.config.js
+// with a timestamp, so every deploy gets a fresh asset cache automatically.
+const CACHE_VERSION = '__SW_VERSION__';
+const OFFLINE_CACHE = 'offline-v1';
+const ASSET_CACHE = `assets-${CACHE_VERSION}`;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(OFFLINE_CACHE).then(cache => cache.add('/offline.html'))
   );
-  self.skipWaiting();
+  // NB: We no longer call self.skipWaiting() here. A new SW sits in the
+  // `waiting` state until the client posts a SKIP_WAITING message, which
+  // happens when the user clicks the "Reload" button on the update toast.
+  // This is what lets the app detect the update and prompt the user.
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
+    caches.keys().then(keys =>
       Promise.all(
         keys
-          .filter((key) => key !== CACHE_NAME)
-          .map((key) => caches.delete(key))
+          .filter(k => k !== OFFLINE_CACHE && k !== ASSET_CACHE)
+          .map(k => caches.delete(k))
       )
     )
   );
@@ -28,32 +35,48 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Only cache GET requests
-  if (event.request.method !== 'GET') return;
+  const { request } = event;
+  const url = new URL(request.url);
 
-  // Network-first strategy for navigation, cache-first for assets
-  const url = new URL(event.request.url);
-
-  if (event.request.mode === 'navigate') {
+  // Navigation: network-first, offline fallback
+  if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match('/index.html'))
+      fetch(request).catch(() => caches.match('/offline.html'))
     );
     return;
   }
 
-  // Cache-first for same-origin assets
-  if (url.origin === location.origin) {
+  // Hashed assets (Vite output): cache-first (immutable, filename changes on rebuild)
+  if (url.pathname.startsWith('/assets/')) {
     event.respondWith(
-      caches.match(event.request).then((cached) => {
+      caches.match(request).then(cached => {
         if (cached) return cached;
-        return fetch(event.request).then((response) => {
+        return fetch(request).then(response => {
           if (response.ok) {
             const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+            caches.open(ASSET_CACHE).then(cache => cache.put(request, clone));
           }
           return response;
         });
       })
     );
+    return;
+  }
+
+  // Model/WASM files: cache-first (versioned, long-lived)
+  if (url.pathname.match(/\.(onnx|wasm)$/)) {
+    event.respondWith(
+      caches.match(request).then(cached => {
+        if (cached) return cached;
+        return fetch(request).then(response => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(ASSET_CACHE).then(cache => cache.put(request, clone));
+          }
+          return response;
+        });
+      })
+    );
+    return;
   }
 });

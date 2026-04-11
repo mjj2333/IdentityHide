@@ -1,19 +1,119 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { usePipeline } from '../context/PipelineContext';
 import { useImagePipeline } from '../hooks/useImagePipeline';
+import { useCoachMarks } from '../hooks/useCoachMarks';
+import CoachMark from './CoachMark';
+import ResolutionTierModal from './ResolutionTierModal';
+import { track } from '../utils/analytics';
+import { getSessionInfo, loadSession, clearSession } from '../utils/sessionStore';
 import '../styles/DropZone.css';
 
+// Format ms delta as a terse relative time for the restore banner.
+// Sessions are discarded after 24h (see sessionStore.getSessionInfo), so we
+// don't need to handle anything older than that.
+function formatTimeAgo(ts) {
+  const diff = Date.now() - ts;
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h ago`;
+}
+
+function screenLabel(screen) {
+  switch (screen) {
+    case 'mask-edit': return 'editing';
+    case 'review': return 'review';
+    case 'export': return 'export';
+    default: return null;
+  }
+}
+
 export default function DropZone() {
-  const { setOriginalFile } = usePipeline();
+  const { setOriginalFile, setScreen, restoreSession, setWarning, setSelectedTierMP } = usePipeline();
   const { runPipeline } = useImagePipeline();
   const [dragActive, setDragActive] = useState(false);
+  const [savedSession, setSavedSession] = useState(null);
+  const [restoring, setRestoring] = useState(false);
+  // Pending upload — set when the user picks a file but hasn't yet chosen
+  // a resolution tier. Holds { file, width, height } while the modal is open.
+  const [pendingUpload, setPendingUpload] = useState(null);
   const fileInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+  const dropTargetRef = useRef(null);
+
+  const COACH_STEPS = [
+    { targetRef: dropTargetRef, position: 'top', body: 'Drop an image, click to browse, or paste from clipboard. On mobile, tap the camera button below.' },
+  ];
+  const { activeStep, totalSteps, next, dismiss, isActive, restart } = useCoachMarks('drop', COACH_STEPS.length);
+
+  useEffect(() => { getSessionInfo().then(setSavedSession); }, []);
+
+  // Hidden admin access: tap logo 5 times
+  const tapCountRef = useRef(0);
+  const tapTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(tapTimerRef.current), []);
+  const handleLogoTap = useCallback(() => {
+    tapCountRef.current++;
+    clearTimeout(tapTimerRef.current);
+    tapTimerRef.current = setTimeout(() => { tapCountRef.current = 0; }, 1500);
+    if (tapCountRef.current >= 5) {
+      tapCountRef.current = 0;
+      setScreen('admin');
+    }
+  }, []);
+
+  const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+  // Peek at image dimensions so the tier modal can disable options that
+  // would exceed the source resolution. Resolves to { width, height } or
+  // null if the image can't be decoded (the pipeline will surface the
+  // real error later).
+  const readImageSize = useCallback((file) => new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    img.src = url;
+  }), []);
 
   const handleFile = useCallback(async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`File too large (${(file.size / 1024 / 1024).toFixed(0)}MB). Maximum is 50MB.`);
+      return;
+    }
+    track('image_uploaded', { file_type: file.type, file_size_kb: Math.round(file.size / 1024) });
+    const size = await readImageSize(file);
+    if (!size) {
+      // Fall through to the normal pipeline so the user sees the real decode
+      // error in the loading overlay instead of a modal stuck on 0×0.
+      setOriginalFile(file);
+      await runPipeline(file);
+      return;
+    }
+    // Defer the pipeline kickoff until the user picks a tier.
+    setPendingUpload({ file, width: size.width, height: size.height });
+  }, [setOriginalFile, runPipeline, readImageSize]);
+
+  const handleTierSelect = useCallback(async (tierMP) => {
+    if (!pendingUpload) return;
+    const { file } = pendingUpload;
+    setPendingUpload(null);
+    setSelectedTierMP(tierMP);
     setOriginalFile(file);
-    await runPipeline(file);
-  }, [setOriginalFile, runPipeline]);
+    await runPipeline(file, tierMP);
+  }, [pendingUpload, setOriginalFile, runPipeline, setSelectedTierMP]);
+
+  const handleTierCancel = useCallback(() => {
+    setPendingUpload(null);
+  }, []);
 
   const onDrop = useCallback((e) => {
     e.preventDefault();
@@ -36,37 +136,100 @@ export default function DropZone() {
   }, []);
 
   const onFileSelect = useCallback((e) => {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
+    // Reset the input so picking the same file a second time still fires
+    // onChange. Without this, cancelling the resolution-tier modal and then
+    // re-selecting the same image silently does nothing (browser sees no
+    // value change and skips the event).
+    input.value = '';
     if (file) handleFile(file);
   }, [handleFile]);
 
-  const onPaste = useCallback((e) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile();
-        if (file) handleFile(file);
-        break;
+  // Listen for paste events at the document level so the user can paste an
+  // image without having to click into a specific element first. Attaching to
+  // the <main> element instead required tabIndex={0}, which put a non-interactive
+  // landmark into the tab order.
+  useEffect(() => {
+    const onPaste = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) handleFile(file);
+          break;
+        }
       }
-    }
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
   }, [handleFile]);
 
   const onCameraCapture = useCallback(() => {
-    fileInputRef.current?.click();
+    cameraInputRef.current?.click();
+  }, []);
+
+  const handleRestore = useCallback(async () => {
+    setRestoring(true);
+    try {
+      const session = await loadSession();
+      if (session) {
+        restoreSession(session);
+      } else {
+        setSavedSession(null);
+      }
+    } catch (e) {
+      console.warn('[sessionStore] restore failed:', e?.message || e);
+      setSavedSession(null);
+      setWarning('Couldn\'t restore your previous session — the saved data may be corrupt. Starting fresh.');
+      // Best-effort cleanup of the corrupt entry so the next visit doesn't
+      // offer to restore it again.
+      clearSession().catch(() => {});
+    } finally {
+      setRestoring(false);
+    }
+  }, [restoreSession, setWarning]);
+
+  const handleDismissSession = useCallback(() => {
+    clearSession();
+    setSavedSession(null);
   }, []);
 
   return (
-    <div className="dropzone-screen" onPaste={onPaste} tabIndex={0}>
+    <main className="dropzone-screen">
       <div className="dropzone-header">
-        <h1 className="dropzone-title">
-          <span className="shield-icon">&#x1F6E1;</span> PixelShield
+        <h1 className="dropzone-title" onClick={handleLogoTap}>
+          <img className="dropzone-logo dropzone-logo-dark" src="/logo-dark-fixed.png" alt="IdentityHide" />
+          <img className="dropzone-logo dropzone-logo-light" src="/logo-light-fixed.png" alt="IdentityHide" />
         </h1>
-        <p className="dropzone-tagline">Protect identities in photos. Automatic face detection, metadata stripping, and smart blurring — all on-device.</p>
+        <p className="dropzone-tagline">Share photos without revealing who you are or where you&apos;ve been. Faces blurred, tattoos removed, location data wiped.</p>
       </div>
 
-      <div
+      {savedSession && (
+        <div className="dropzone-restore">
+          <span>
+            Unsaved work
+            {savedSession.filename && <> on <strong>{savedSession.filename}</strong></>}
+            {screenLabel(savedSession.screen) && <> ({screenLabel(savedSession.screen)})</>}
+            {' — '}{formatTimeAgo(savedSession.savedAt)}
+          </span>
+          <div className="dropzone-restore-actions">
+            <button className="btn btn-primary btn-sm" onClick={handleRestore} disabled={restoring}>
+              {restoring ? 'Restoring...' : 'Resume'}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={handleDismissSession}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      <button
+        ref={dropTargetRef}
+        type="button"
         className={`dropzone-target ${dragActive ? 'dropzone-active' : ''}`}
+        aria-label="Upload an image"
         onDrop={onDrop}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -80,18 +243,26 @@ export default function DropZone() {
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
           </div>
-          <p className="dropzone-label">Drop an image here, click to browse, or paste from clipboard</p>
-          <p className="dropzone-formats">JPEG, PNG, WebP — processed entirely on your device</p>
+          <p className="dropzone-label">Drop an image here or click to browse</p>
         </div>
-      </div>
+      </button>
 
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
+        onChange={onFileSelect}
+        className="dropzone-input"
+        aria-label="Choose an image file"
+      />
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
         capture="environment"
         onChange={onFileSelect}
         className="dropzone-input"
+        aria-label="Take a photo with camera"
       />
 
       <button className="camera-btn" onClick={onCameraCapture}>
@@ -104,18 +275,78 @@ export default function DropZone() {
 
       <div className="dropzone-features">
         <div className="feature">
-          <span className="feature-icon">&#x1F50D;</span>
-          <span>Auto face detection</span>
+          <span className="feature-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="5"/><path d="M3 21v-2a7 7 0 0 1 14 0v2"/></svg>
+          </span>
+          <span>Face detection & blur</span>
         </div>
         <div className="feature">
-          <span className="feature-icon">&#x1F4CD;</span>
-          <span>GPS & metadata stripped</span>
+          <span className="feature-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M3 12h18M3 18h18"/><line x1="2" y1="2" x2="22" y2="22" strokeWidth="2.5"/></svg>
+          </span>
+          <span>Tattoo removal</span>
         </div>
         <div className="feature">
-          <span className="feature-icon">&#x1F512;</span>
-          <span>100% on-device</span>
+          <span className="feature-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </span>
+          <span>Metadata stripped</span>
         </div>
       </div>
-    </div>
+
+      <div className="dropzone-bottom-links">
+        <a href="/feedback" className="dropzone-feedback-link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+          Send Feedback
+        </a>
+        <a href="/terms" className="dropzone-feedback-link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="8" y1="13" x2="16" y2="13" />
+            <line x1="8" y1="17" x2="16" y2="17" />
+          </svg>
+          Terms
+        </a>
+        <a href="/privacy" className="dropzone-feedback-link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+          Privacy
+        </a>
+        {!isActive && (
+          <button className="dropzone-tips-link" onClick={restart}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            Show tips
+          </button>
+        )}
+      </div>
+
+      {isActive && COACH_STEPS[activeStep] && (
+        <CoachMark
+          {...COACH_STEPS[activeStep]}
+          stepIndex={activeStep}
+          totalSteps={totalSteps}
+          screenKey="drop"
+          onNext={next}
+          onDismiss={dismiss}
+        />
+      )}
+
+      {pendingUpload && (
+        <ResolutionTierModal
+          srcWidth={pendingUpload.width}
+          srcHeight={pendingUpload.height}
+          onSelect={handleTierSelect}
+          onCancel={handleTierCancel}
+        />
+      )}
+    </main>
   );
 }

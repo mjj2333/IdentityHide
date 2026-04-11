@@ -1,0 +1,177 @@
+/* Coach Mark — contextual walkthrough bubbles */
+
+.coach-mark {
+  position: fixed;
+  z-index: var(--z-coach-mark, 45);
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 14px 16px 10px;
+  max-width: 280px;
+  min-width: 200px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+}
+
+.coach-mark-animate {
+  animation: coach-fade-in 0.2s ease-out;
+}
+
+@keyframes coach-fade-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Spotlight: a transparent rect positioned over the target element whose
+ * giant box-shadow dims everything else in the viewport. The cutout is
+ * pointer-events: none so clicks pass through to the underlying target. */
+.coach-mark-spotlight {
+  position: fixed;
+  pointer-events: none;
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  transition:
+    top 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    left 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    height 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: coach-spotlight-fade-in 0.3s ease-out;
+  z-index: calc(var(--z-coach-mark, 45) - 1);
+}
+
+@keyframes coach-spotlight-fade-in {
+  from { box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0); }
+  to   { box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coach-mark-spotlight {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* Arrow pointing at target */
+.coach-mark-arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  transform: translateX(-8px);
+}
+
+.coach-mark-arrow-bottom {
+  /* Arrow on top of bubble pointing up at target */
+  top: -8px;
+  border-bottom: 8px solid var(--accent);
+}
+
+.coach-mark-arrow-bottom::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: -7px;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 7px solid var(--bg-elevated);
+}
+
+.coach-mark-arrow-top {
+  /* Arrow on bottom of bubble pointing down at target */
+  bottom: -8px;
+  border-top: 8px solid var(--accent);
+}
+
+.coach-mark-arrow-top::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: -7px;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid var(--bg-elevated);
+}
+
+.coach-mark-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-heading);
+  margin-bottom: 4px;
+}
+
+.coach-mark-body {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.coach-mark-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.coach-mark-step {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.coach-mark-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.coach-mark-btn {
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  transition: background var(--dur-fast);
+}
+
+.coach-mark-btn-next {
+  background: var(--accent);
+  color: #fff;
+}
+
+.coach-mark-btn-next:hover {
+  background: var(--accent-hover);
+}
+
+.coach-mark-btn-skip {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.coach-mark-btn-skip:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.coach-mark-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* Visually hidden live-region node — only consumed by assistive tech. */
+.coach-mark-sr-announcer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

@@ -1,13 +1,19 @@
 {
-  "name": "PixelShield — Protect Identities in Photos",
-  "short_name": "PixelShield",
-  "description": "Auto-detect faces, strip metadata, and blur sensitive areas — all on-device.",
+  "id": "/",
+  "name": "IdentityHide",
+  "short_name": "IdentityHide",
+  "description": "Auto-detect faces, remove tattoos, strip metadata, and blur sensitive areas.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#0a0a0f",
-  "theme_color": "#0a0a0f",
+  "background_color": "#0a0a0a",
+  "theme_color": "#0a0a0a",
   "orientation": "any",
   "categories": ["photography", "privacy", "utilities"],
+  "prefer_related_applications": false,
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
   "icons": [
     {
       "src": "/icons/icon-192.png",

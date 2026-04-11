@@ -1,0 +1,12 @@
+{
+  "name": "identityhide-functions",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Server-only deps for Netlify Functions. Keeping these out of the root package.json prevents them from being installed into the frontend's node_modules and makes it obvious which packages run on the server vs. in the browser.",
+  "dependencies": {
+    "@netlify/blobs": "^10.7.4",
+    "@sentry/node": "^10.47.0",
+    "@supabase/supabase-js": "^2.101.1"
+  }
+}
