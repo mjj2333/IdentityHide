@@ -16,6 +16,15 @@ import '../styles/ResolutionTierModal.css';
  * starts. Lets the user pick the working megapixel tier, which controls
  * how aggressively the image is downscaled before face detection + Flux
  * inpainting. Tiers larger than the source image are disabled.
+ *
+ * onSelect contract: called as `onSelect(mp, selectedKey)` on confirm.
+ *   - `mp` is the numeric megapixel target (already resolved via getTierMP).
+ *   - `selectedKey` is the tier identifier string ('fast' or 'native').
+ * Persistence of `selectedKey` to localStorage is handled inside this modal
+ * via `saveTierKey(selectedKey)` before onSelect fires — the caller does NOT
+ * need to persist it. Callers currently use only `mp` and ignore
+ * `selectedKey` (see DropZone.handleTierSelect); the key is emitted anyway
+ * so future callers that need it don't have to re-read localStorage.
  */
 export default function ResolutionTierModal({ srcWidth, srcHeight, onSelect, onCancel }) {
   const modalRef = useRef(null);
@@ -63,8 +72,11 @@ export default function ResolutionTierModal({ srcWidth, srcHeight, onSelect, onC
   }, []);
 
   const srcMP = (srcWidth * srcHeight) / 1_000_000;
+  const submittedRef = useRef(false);
 
   const handleConfirm = () => {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
     const mp = getTierMP(selectedKey);
     saveTierKey(selectedKey);
     track('tier_selected', { key: selectedKey, mp, srcMP: Number(srcMP.toFixed(2)) });
@@ -91,7 +103,7 @@ export default function ResolutionTierModal({ srcWidth, srcHeight, onSelect, onC
       >
         <h2 id="tier-modal-title" className="tier-modal-title">Choose output quality</h2>
         <p className="tier-modal-subtitle">
-          Higher quality takes longer to process. Source: {srcWidth}×{srcHeight} ({srcMP.toFixed(1)} MP)
+          Higher quality gives sharper results but takes longer. Your photo: {srcWidth}×{srcHeight}
         </p>
 
         <div className="tier-grid" role="radiogroup" aria-label="Resolution tier">
@@ -111,17 +123,14 @@ export default function ResolutionTierModal({ srcWidth, srcHeight, onSelect, onC
               >
                 <div className="tier-card-header">
                   <span className="tier-card-label">{tier.label}</span>
-                  <span className="tier-card-mp">{tier.mp} MP</span>
+                  <span className="tier-card-mp">{tier.time}</span>
                 </div>
                 <div className="tier-card-dims">
                   {disabled
-                    ? `Source is only ${srcMP.toFixed(1)} MP`
-                    : `${dims.width}×${dims.height}`}
+                    ? 'Photo too small for this option'
+                    : `Output: ${dims.width}×${dims.height}`}
                 </div>
                 <div className="tier-card-desc">{tier.desc}</div>
-                {!disabled && (
-                  <div className="tier-card-time">{tier.time}</div>
-                )}
               </button>
             );
           })}

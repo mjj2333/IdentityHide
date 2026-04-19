@@ -29,8 +29,8 @@ export default function ConfirmModal({
 
   return (
     <div className="confirm-backdrop" onClick={onCancel}>
-      <div className="confirm-modal" ref={modalRef} onClick={(e) => e.stopPropagation()}>
-        <p className="confirm-message">{message}</p>
+      <div className="confirm-modal" ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="confirm-modal-msg" onClick={(e) => e.stopPropagation()}>
+        <p className="confirm-message" id="confirm-modal-msg">{message}</p>
         <div className="confirm-actions">
           <button className={`btn btn-${confirmVariant}`} onClick={onConfirm}>
             {confirmLabel}

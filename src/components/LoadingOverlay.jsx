@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react';
 import { usePipeline } from '../context/PipelineContext';
 
 const STEPS = [
@@ -8,6 +9,17 @@ const STEPS = [
 
 export default function LoadingOverlay() {
   const { status, error, reset } = usePipeline();
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancel = useCallback(() => {
+    if (cancelling) return;
+    setCancelling(true);
+    // Let the UI repaint with "Cancelling..." before tearing down
+    setTimeout(() => {
+      reset();
+      setCancelling(false);
+    }, 0);
+  }, [cancelling, reset]);
 
   if (status === 'idle' || status === 'ready') return null;
 
@@ -32,7 +44,7 @@ export default function LoadingOverlay() {
 
   const stepIndex = STEPS.findIndex(s => s.key === status);
   const currentStep = stepIndex >= 0 ? stepIndex : 0;
-  const currentLabel = STEPS[currentStep]?.label || 'Processing...';
+  const currentLabel = cancelling ? 'Cancelling...' : (STEPS[currentStep]?.label || 'Processing...');
 
   return (
     <div className="loading-overlay">
@@ -52,8 +64,8 @@ export default function LoadingOverlay() {
             </div>
           ))}
         </div>
-        <button className="btn btn-secondary" onClick={reset}>
-          Cancel
+        <button className="btn btn-secondary" onClick={handleCancel} disabled={cancelling}>
+          {cancelling ? 'Cancelling...' : 'Cancel'}
         </button>
       </div>
     </div>

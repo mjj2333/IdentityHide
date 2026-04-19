@@ -1,9 +1,9 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { usePipeline } from '../context/PipelineContext';
-import { applyMaskedBlur, stackBlur } from '../utils/blurEngine';
+import { applyMaskedBlur, stackBlur, FACE_BOX_EXPAND } from '../utils/blurEngine';
 import { track } from '../utils/analytics';
 import { useZoomPan } from '../hooks/useZoomPan';
-import { useCoachMarks } from '../hooks/useCoachMarks';
+import { useCoachMarks, suppressAllWalkthroughs } from '../hooks/useCoachMarks';
 import ScreenShell from './ScreenShell';
 import CoachMark from './CoachMark';
 import ConfirmModal from './ConfirmModal';
@@ -30,8 +30,12 @@ export default function ReviewScreen() {
   const dividerRef = useRef(null);
   const touchUpRef = useRef(null);
 
+  const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+
   const COACH_STEPS = [
-    { targetRef: dividerRef, position: 'bottom', title: 'Compare before & after', body: 'Drag the divider to compare the original with your protected version.' },
+    { targetRef: dividerRef, position: 'bottom', title: 'Compare before & after', body: isMobile
+      ? 'Slide the divider to compare the original with your protected version.'
+      : 'Drag the divider to compare the original with your protected version.' },
     { targetRef: touchUpRef, position: 'top', title: 'Need adjustments?', body: 'Tap Touch Up to go back and refine your masks.' },
   ];
   const coachMarks = useCoachMarks('review', COACH_STEPS.length);
@@ -68,16 +72,16 @@ export default function ReviewScreen() {
       for (const det of dets) {
         ctx.fillStyle = 'white';
         if (det.shape === 'rectangle') {
-          const w = (det.bottomRight[0] - det.topLeft[0]) * 1.1;
-          const h = (det.bottomRight[1] - det.topLeft[1]) * 1.1;
+          const w = (det.bottomRight[0] - det.topLeft[0]) * FACE_BOX_EXPAND;
+          const h = (det.bottomRight[1] - det.topLeft[1]) * FACE_BOX_EXPAND;
           const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
           const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
           ctx.fillRect(cx - w/2, cy - h/2, w, h);
         } else {
           const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
           const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-          const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * 1.1;
-          const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * 1.1;
+          const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
+          const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
           ctx.beginPath();
           ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
           ctx.fill();
@@ -136,7 +140,8 @@ export default function ReviewScreen() {
       clean.getContext('2d').drawImage(base, 0, 0);
       outputCanvasRef.current = clean;
     } else {
-      outputCanvasRef.current = applyMaskedBlur(base, mask, mode, strength, dets);
+      const barSettings = mode === 'blackbar' ? { width: blurSettingsRef.current.barWidth ?? 20, length: blurSettingsRef.current.barLength ?? 110, angle: blurSettingsRef.current.barAngle ?? 0 } : null;
+      outputCanvasRef.current = applyMaskedBlur(base, mask, mode, strength, dets, barSettings);
     }
     setRenderTick(t => t + 1);
   }, [inpaintedCanvasRef, outputCanvasRef, buildCombinedMask]);
@@ -168,49 +173,30 @@ export default function ReviewScreen() {
     preview.getContext('2d').drawImage(source, 0, 0);
   }, [originalCanvasRef]);
 
-  // Track the active compare-drag listeners so unmount mid-drag can tear
-  // them down cleanly (instead of leaking window listeners that reference
-  // stale state).
-  const compareDragRef = useRef(null);
+  // AbortController for compare-drag listeners — abort() atomically
+  // removes all listeners, eliminating the race between onUp and unmount.
+  const dragAbortRef = useRef(null);
 
   const handleCompareDown = useCallback((e) => {
     e.preventDefault();
     const canvas = previewRef.current;
     if (!canvas) return;
-    // If a previous drag somehow wasn't cleaned up, tear it down first.
-    if (compareDragRef.current) {
-      const { onMove: prevMove, onUp: prevUp } = compareDragRef.current;
-      window.removeEventListener('pointermove', prevMove);
-      window.removeEventListener('pointerup', prevUp);
-      window.removeEventListener('pointercancel', prevUp);
-    }
-    const onMove = (ev) => {
+    // Abort any in-flight drag (cleans up all its listeners atomically).
+    dragAbortRef.current?.abort();
+    const ac = new AbortController();
+    dragAbortRef.current = ac;
+    const opts = { signal: ac.signal };
+    window.addEventListener('pointermove', (ev) => {
       const rect = canvas.getBoundingClientRect();
       const x = ((ev.clientX - rect.left) / rect.width) * 100;
       setSplitPos(Math.max(0, Math.min(100, x)));
-    };
-    const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      compareDragRef.current = null;
-    };
-    compareDragRef.current = { onMove, onUp };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    }, opts);
+    window.addEventListener('pointerup', () => ac.abort(), opts);
+    window.addEventListener('pointercancel', () => ac.abort(), opts);
   }, []);
 
   // Guarantee cleanup if the component unmounts mid-drag.
-  useEffect(() => () => {
-    if (compareDragRef.current) {
-      const { onMove, onUp } = compareDragRef.current;
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
-      compareDragRef.current = null;
-    }
-  }, []);
+  useEffect(() => () => { dragAbortRef.current?.abort(); }, []);
 
   const handleCompareKey = useCallback((e) => {
     const step = e.shiftKey ? 10 : 2;
@@ -388,6 +374,7 @@ export default function ReviewScreen() {
           screenKey="review"
           onNext={coachMarks.next}
           onDismiss={coachMarks.dismiss}
+          onDismissAll={() => { suppressAllWalkthroughs(); coachMarks.dismiss(); }}
         />
       )}
 

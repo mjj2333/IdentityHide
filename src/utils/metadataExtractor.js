@@ -24,6 +24,13 @@ const GPS_TAGS = {
   0x0006: 'alt',
 };
 
+// Cap IFD entry iteration. Real-world JPEGs have well under 100 entries per
+// IFD; the spec's 16-bit count field allows up to 65,535, which a malformed
+// file can exploit to force tens of thousands of DataView reads per IFD
+// across three IFDs (main + SubIFD + GPS). Bounding to a generous ceiling
+// keeps the parser O(1) regardless of attacker input.
+const MAX_IFD_ENTRIES = 512;
+
 function readUint16(view, offset, littleEndian) {
   return view.getUint16(offset, littleEndian);
 }
@@ -52,7 +59,10 @@ function readRational(view, offset, littleEndian) {
 function readIFD(view, tiffStart, ifdOffset, littleEndian, tagMap) {
   const result = {};
   try {
-    const entries = readUint16(view, tiffStart + ifdOffset, littleEndian);
+    const ifdStart = tiffStart + ifdOffset;
+    if (ifdStart < 0 || ifdStart + 2 > view.byteLength) return result;
+    const rawEntries = readUint16(view, ifdStart, littleEndian);
+    const entries = Math.min(rawEntries, MAX_IFD_ENTRIES);
     for (let i = 0; i < entries; i++) {
       const entryOffset = tiffStart + ifdOffset + 2 + i * 12;
       if (entryOffset + 12 > view.byteLength) break;
@@ -97,9 +107,11 @@ function readIFD(view, tiffStart, ifdOffset, littleEndian, tagMap) {
         }
       }
     }
-    // Return next IFD offset
-    const nextOffset = readUint32(view, tiffStart + ifdOffset + 2 + entries * 12, littleEndian);
-    result._nextIFD = nextOffset;
+    // Return next IFD offset (only if within bounds)
+    const nextOffsetPos = ifdStart + 2 + entries * 12;
+    if (nextOffsetPos + 4 <= view.byteLength) {
+      result._nextIFD = readUint32(view, nextOffsetPos, littleEndian);
+    }
   } catch {
     // Graceful degradation on corrupt EXIF
   }
@@ -190,32 +202,26 @@ export async function extractMetadata(file) {
   // Read IFD0
   const ifd0 = readIFD(view, tiffStart, ifd0Offset, littleEndian, EXIF_TAGS);
 
-  // Look for SubIFD (EXIF IFD pointer at tag 0x8769)
+  // Look for SubIFD (EXIF IFD pointer at tag 0x8769) and GPS IFD (tag 0x8825).
+  // Single pass over IFD0 entries — bounded by MAX_IFD_ENTRIES.
   let exifIFD = {};
-  try {
-    const entries = readUint16(view, tiffStart + ifd0Offset, littleEndian);
-    for (let i = 0; i < entries; i++) {
-      const entryOffset = tiffStart + ifd0Offset + 2 + i * 12;
-      const tag = readUint16(view, entryOffset, littleEndian);
-      if (tag === 0x8769) {
-        const subOffset = readUint32(view, entryOffset + 8, littleEndian);
-        exifIFD = readIFD(view, tiffStart, subOffset, littleEndian, EXIF_TAGS);
-        break;
-      }
-    }
-  } catch { /* ignore */ }
-
-  // Look for GPS IFD (pointer at tag 0x8825)
   let gpsIFD = {};
   try {
-    const entries = readUint16(view, tiffStart + ifd0Offset, littleEndian);
-    for (let i = 0; i < entries; i++) {
-      const entryOffset = tiffStart + ifd0Offset + 2 + i * 12;
-      const tag = readUint16(view, entryOffset, littleEndian);
-      if (tag === 0x8825) {
-        const gpsOffset = readUint32(view, entryOffset + 8, littleEndian);
-        gpsIFD = readIFD(view, tiffStart, gpsOffset, littleEndian, GPS_TAGS);
-        break;
+    const ifd0Start = tiffStart + ifd0Offset;
+    if (ifd0Start >= 0 && ifd0Start + 2 <= view.byteLength) {
+      const rawEntries = readUint16(view, ifd0Start, littleEndian);
+      const entries = Math.min(rawEntries, MAX_IFD_ENTRIES);
+      for (let i = 0; i < entries; i++) {
+        const entryOffset = ifd0Start + 2 + i * 12;
+        if (entryOffset + 12 > view.byteLength) break;
+        const tag = readUint16(view, entryOffset, littleEndian);
+        if (tag === 0x8769) {
+          const subOffset = readUint32(view, entryOffset + 8, littleEndian);
+          exifIFD = readIFD(view, tiffStart, subOffset, littleEndian, EXIF_TAGS);
+        } else if (tag === 0x8825) {
+          const gpsOffset = readUint32(view, entryOffset + 8, littleEndian);
+          gpsIFD = readIFD(view, tiffStart, gpsOffset, littleEndian, GPS_TAGS);
+        }
       }
     }
   } catch { /* ignore */ }

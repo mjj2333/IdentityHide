@@ -58,6 +58,27 @@ export function useCoachMarks(screenKey, stepCount, { skip = false } = {}) {
     return () => clearTimeout(timerRef.current);
   }, [screenKey, skip, version]);
 
+  // Cross-tab dismissal sync. If a second tab is open on the same screen
+  // when the user dismisses in tab A, tab B would otherwise keep showing
+  // the coach mark until navigation or reload — the main effect above
+  // captures state on mount/dep-change only. The storage event fires on
+  // OTHER tabs (not the writer) when localStorage changes, so we hide
+  // active marks as soon as the current screen appears in the shared
+  // dismissal state.
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.storageArea !== localStorage || e.key !== STORAGE_KEY) return;
+      const newState = readState();
+      if (newState[screenKey]) {
+        clearTimeout(timerRef.current);
+        setActiveStep(null);
+        setReady(true);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [screenKey]);
+
   const dismiss = useCallback(() => {
     setActiveStep(null);
     const state = readState();
@@ -94,4 +115,17 @@ export function useCoachMarks(screenKey, stepCount, { skip = false } = {}) {
 export function resetWalkthrough() {
   try { localStorage.removeItem(STORAGE_KEY); } catch {}
   try { sessionStorage.removeItem(SUPPRESS_KEY); } catch {}
+}
+
+/** All known screen keys — used by suppressAll to mark everything as seen. */
+const ALL_SCREENS = ['drop', 'maskEdit', 'review', 'export'];
+
+/** Suppress walkthroughs on all screens globally. */
+export function suppressAllWalkthroughs() {
+  const state = {};
+  const suppressed = {};
+  const now = Date.now();
+  ALL_SCREENS.forEach(k => { state[k] = now; suppressed[k] = true; });
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+  try { sessionStorage.setItem(SUPPRESS_KEY, JSON.stringify(suppressed)); } catch {}
 }

@@ -31,6 +31,11 @@
   to = "/index.html"
   status = 200
 
+[[redirects]]
+  from = "/faq"
+  to = "/index.html"
+  status = 200
+
 # Security headers for all pages
 [[headers]]
   for = "/*"
@@ -42,23 +47,32 @@
     # HSTS: force HTTPS for 1 year. Netlify already redirects http→https; this
     # hardens against downgrade attacks after the first visit.
     Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
-    # CSP notes:
-    # - 'unsafe-inline' for script-src is required by the two inline <script>
-    #   blocks in index.html (SW registration + beforeinstallprompt capture).
-    # - 'wasm-unsafe-eval' is required by TensorFlow.js / blazeface.
-    # - 'unsafe-inline' for style-src is required by React's inline style props.
-    # - connect-src allows Supabase via Netlify functions (self), the ComfyUI
-    #   tunnel at identity-hide.com, the tfhub.dev / Google Cloud Storage
-    #   hosts that BlazeFace fetches its model weights from on first use, and
-    #   the Sentry ingest endpoint for our project's org (o4511186341658625).
-    # - img-src allows data: and blob: for canvas exports and detection previews.
-    # - AppLixir: cdn.applixir.com (SDK), *.applixir.com (ad serving),
-    #   frame-src allows the ad player iframe. May need expansion for
-    #   production ad network domains (Google AdX, etc.).
-    # CSP removed — Google IMA (used by AppLixir ad SDK) dynamically
-    # loads scripts via eval/blob URLs from many domains, making it
-    # incompatible with Content-Security-Policy. Other security headers
-    # (HSTS, X-Frame-Options, etc.) remain active.
+    # Content-Security-Policy is Report-Only for now — AppLixir (via Google
+    # IMA) and Clickadilla impression pixels / ad videos both pull from
+    # third-party domains chosen at runtime, so the full allowlist isn't known
+    # until real traffic runs through this. Violations log to the browser
+    # console; flip the header name to Content-Security-Policy (drop the
+    # "-Report-Only" suffix) once a draft deploy has loaded an AppLixir
+    # rewarded ad + a Clickadilla interstitial with no violation reports.
+    #
+    # Why each concession is here:
+    # - 'unsafe-inline' in script-src: two inline blocks in index.html
+    #   (window.__gpp stub + beforeinstallprompt capture).
+    # - 'wasm-unsafe-eval': TensorFlow.js / BlazeFace WASM backend.
+    # - 'unsafe-inline' in style-src: React inline style props + the style
+    #   assignments in clickadillaAd.js for the ad overlay.
+    # - img-src https:: VAST impression pixels come from arbitrary tracker
+    #   domains. Tightening this requires sandboxing ads into an iframe.
+    # - media-src https:: Clickadilla video URLs come from whatever CDN the
+    #   winning advertiser uses. Same story as impression pixels.
+    # - connect-src lists: ComfyUI tunnel (identity-hide.com, ws for progress),
+    #   AppLixir SDK + ad endpoints, Sentry ingest, tfhub.dev + Google Cloud
+    #   Storage + kaggle.com (BlazeFace model weights — tfhub now redirects
+    #   model downloads to Kaggle's CDN).
+    # - Adsterra popunder script loads from profitablecpmratenetwork.com;
+    #   opened popunders are cross-origin window.open (not iframed), so no
+    #   frame-src entry is needed — script-src + connect-src cover it.
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.applixir.com https://*.applixir.com https://*.profitablecpmratenetwork.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://identity-hide.com wss://identity-hide.com https://cdn.applixir.com https://*.applixir.com https://*.profitablecpmratenetwork.com https://o4511186341658625.ingest.us.sentry.io https://tfhub.dev https://storage.googleapis.com https://www.kaggle.com https://kaggle.com; font-src 'self' data:; frame-src https://*.applixir.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 
 # Cache ONNX models for 1 year — they're versioned by filename
 [[headers]]

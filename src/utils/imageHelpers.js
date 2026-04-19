@@ -2,11 +2,17 @@
  * Load a File into a canvas, stripping metadata in the process.
  * The browser applies EXIF orientation when drawing to canvas.
  */
-export function fileToCanvas(file) {
+export function fileToCanvas(file, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
+    const timer = setTimeout(() => {
+      img.onload = img.onerror = null;
+      URL.revokeObjectURL(url);
+      reject(new Error('Image load timed out'));
+    }, timeoutMs);
     img.onload = () => {
+      clearTimeout(timer);
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
@@ -16,6 +22,7 @@ export function fileToCanvas(file) {
       resolve(canvas);
     };
     img.onerror = () => {
+      clearTimeout(timer);
       URL.revokeObjectURL(url);
       reject(new Error('Failed to load image'));
     };
@@ -55,9 +62,9 @@ export function downloadBlob(blob, filename) {
 
 /**
  * Downscale a canvas to a target total megapixel count.
- * Dimensions are rounded to the nearest multiple of 8 for VAE compatibility
- * (Flux VAE latent space requires dimensions divisible by 16).
- * Returns { canvas, scale } where scale < 1 if downscaled, 1 if already small enough.
+ * Dimensions are rounded to the nearest multiple of 16 for Flux VAE
+ * stride alignment. Returns { canvas }; the object shape is preserved for
+ * forward compatibility even though there's only one field today.
  */
 export function downscaleToMegapixels(sourceCanvas, targetMP = 1) {
   const ALIGN = 16; // Flux VAE needs multiples of 16 for stride alignment
@@ -67,14 +74,14 @@ export function downscaleToMegapixels(sourceCanvas, targetMP = 1) {
     const newW = Math.max(ALIGN, Math.round(width / ALIGN) * ALIGN);
     const newH = Math.max(ALIGN, Math.round(height / ALIGN) * ALIGN);
     if (newW === width && newH === height) {
-      return { canvas: sourceCanvas, scale: 1 };
+      return { canvas: sourceCanvas };
     }
     const c = document.createElement('canvas');
     c.width = newW;
     c.height = newH;
     c.getContext('2d').drawImage(sourceCanvas, 0, 0, newW, newH);
     console.log(`[downscale] ${width}x${height} → ${newW}x${newH} (rounded to ${ALIGN}x)`);
-    return { canvas: c, scale: newW / width };
+    return { canvas: c };
   }
   const scale = Math.sqrt(targetMP / currentMP);
   const newW = Math.max(ALIGN, Math.round((width * scale) / ALIGN) * ALIGN);
@@ -84,8 +91,8 @@ export function downscaleToMegapixels(sourceCanvas, targetMP = 1) {
   c.height = newH;
   c.getContext('2d').drawImage(sourceCanvas, 0, 0, newW, newH);
   const actualMP = (newW * newH) / 1_000_000;
-  console.log(`[downscale] ${width}x${height} (${currentMP.toFixed(1)}MP) → ${newW}x${newH} (${actualMP.toFixed(2)}MP, scale=${(newW/width).toFixed(3)})`);
-  return { canvas: c, scale: newW / width };
+  console.log(`[downscale] ${width}x${height} (${currentMP.toFixed(1)}MP) → ${newW}x${newH} (${actualMP.toFixed(2)}MP)`);
+  return { canvas: c };
 }
 
 /**

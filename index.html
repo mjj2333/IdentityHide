@@ -42,6 +42,27 @@
         window.__pwaInstallPrompt = e;
       });
     </script>
+    <script>
+      // Debug toggles — independent of each other, persisted per-tab:
+      //   ?debug=1 → load Eruda (floating DevTools console for mobile).
+      //   ?panel=1 → show the in-app [ClickadillaAd]/[vast-proxy] log
+      //     panel at the bottom of the screen.
+      // Either flag, once set, persists in sessionStorage for the tab.
+      // Remove this whole block (and CSP allowance for jsdelivr, when CSP
+      // flips to enforcing) before shipping to production.
+      (function() {
+        try {
+          var params = new URLSearchParams(window.location.search);
+          if (params.get('debug') === '1') sessionStorage.setItem('ih_debug', '1');
+          if (params.get('panel') === '1') sessionStorage.setItem('ih_debug_panel', '1');
+          if (sessionStorage.getItem('ih_debug') !== '1') return;
+          var s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/eruda';
+          s.onload = function() { try { window.eruda && window.eruda.init(); } catch (e) {} };
+          document.head.appendChild(s);
+        } catch (e) { /* sessionStorage unavailable — no debug console */ }
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

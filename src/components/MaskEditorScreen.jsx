@@ -3,9 +3,9 @@ import { usePipeline } from '../context/PipelineContext';
 import { useMaskEditor } from '../hooks/useMaskEditor';
 import { useImagePipeline } from '../hooks/useImagePipeline';
 import { useZoomPan } from '../hooks/useZoomPan';
-import { useCoachMarks } from '../hooks/useCoachMarks';
+import { useCoachMarks, suppressAllWalkthroughs } from '../hooks/useCoachMarks';
 import { testConnection } from '../utils/comfyuiApi';
-import { applyMaskedBlur, stackBlur } from '../utils/blurEngine';
+import { applyMaskedBlur, stackBlur, BLUR_MODE_LABELS } from '../utils/blurEngine';
 import { track } from '../utils/analytics';
 import ScreenShell from './ScreenShell';
 import ConfirmModal from './ConfirmModal';
@@ -13,16 +13,9 @@ import CoachMark from './CoachMark';
 import InsetZoom from './InsetZoom';
 import { ProgressOverlay, ErrorOverlay } from './ApplyOverlay';
 import { showRewardedAd } from '../utils/rewardedAd';
+import { showClickadillaInterstitial, preloadAd } from '../utils/clickadillaAd';
+import { loadAdsterraPopunder } from '../utils/adsterraAd';
 
-const hapticTick = (() => {
-  let last = 0;
-  return () => {
-    const now = Date.now();
-    if (now - last < 50) return;
-    last = now;
-    if (navigator.vibrate) navigator.vibrate(1);
-  };
-})();
 
 export default function MaskEditorScreen() {
   const {
@@ -55,12 +48,22 @@ export default function MaskEditorScreen() {
   const timerRef = useRef(null);
   const abortRef = useRef(null);
   const blurRafRef = useRef(null);
-  useEffect(() => () => {
-    clearInterval(timerRef.current);
-    abortRef.current?.abort();
-    globalListenersRef.current.forEach(fn => fn());
-    globalListenersRef.current = [];
-    cancelAnimationFrame(blurRafRef.current);
+  // Track mounted state so the rAF-scheduled blur-preview callback can no-op
+  // if it somehow fires after unmount. cancelAnimationFrame already covers
+  // the normal path; this is defense-in-depth matching the ExportScreen
+  // pattern.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    preloadAd();
+    loadAdsterraPopunder();
+    return () => {
+      clearInterval(timerRef.current);
+      abortRef.current?.abort();
+      globalListenersRef.current.forEach(fn => fn());
+      globalListenersRef.current = [];
+      cancelAnimationFrame(blurRafRef.current);
+      mountedRef.current = false;
+    };
   }, []);
   const [cursorPos, setCursorPos] = useState(null);
   const [renderKey, setRenderKey] = useState(0);
@@ -79,9 +82,13 @@ export default function MaskEditorScreen() {
   const toolbarBodyRef = useRef(null);
   const applyBtnRef = useRef(null);
 
+  const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+
   const COACH_STEPS = [
     { targetRef: tattooTabRef, position: 'top', title: 'Two editing modes', body: 'Use Tattoo Removal to paint over tattoos, or Blur to hide faces. Switch between them using these tabs.' },
-    { targetRef: canvasContainerRef, position: 'bottom', title: 'Paint on the canvas', body: 'Use your finger or mouse to paint over areas to protect. Pinch to zoom, two fingers to pan.' },
+    { targetRef: canvasContainerRef, position: 'bottom', title: 'Paint on the canvas', body: isMobile
+      ? 'Use your finger to paint over areas to protect. Pinch to zoom, two fingers to pan.'
+      : 'Use your mouse to paint over areas to protect. Scroll to zoom, click and drag to pan.' },
     { targetRef: toolbarBodyRef, position: 'top', title: 'Adjust your tools', body: 'Change brush size, switch tools, and undo mistakes. Controls change based on which tab is active.' },
     { targetRef: applyBtnRef, position: 'bottom', title: 'Apply when ready', body: 'Tap Apply to process your image. You can always come back to touch up later.' },
   ];
@@ -284,7 +291,9 @@ export default function MaskEditorScreen() {
     if (!hasMask && !(mode === 'blackbar' && dets.length > 0)) {
       blurPreviewRef.current = null;
     } else {
-      blurPreviewRef.current = applyMaskedBlur(src, mask, mode, strength, dets);
+      const bs = blurSettingsRef.current;
+      const barSettings = mode === 'blackbar' ? { width: bs.barWidth ?? 20, length: bs.barLength ?? 110, angle: bs.barAngle ?? 0 } : null;
+      blurPreviewRef.current = applyMaskedBlur(src, mask, mode, strength, dets, barSettings);
     }
   }, [strippedCanvasRef, buildPreviewMask]);
 
@@ -292,6 +301,7 @@ export default function MaskEditorScreen() {
     if (blurRafRef.current) return;
     blurRafRef.current = requestAnimationFrame(() => {
       blurRafRef.current = null;
+      if (!mountedRef.current) return;
       updateBlurPreview();
       forceRender();
     });
@@ -648,9 +658,10 @@ export default function MaskEditorScreen() {
       for (let i = 3; i < d.length; i += 4) { if (d[i] > 128) return true; }
       return false;
     })();
-    // Rewarded ad gate — only for tattoo removal, skips silently on error
+    // Ad gates — only for tattoo removal, skip silently on error
     if (hasTattoo) {
       try { await showRewardedAd(); } catch { /* let user through */ }
+      try { showClickadillaInterstitial(); } catch { /* non-blocking */ }
     }
     track('apply_clicked', { has_tattoo_mask: hasTattoo, face_regions: editDetsRef.current.length });
     setApplying(true);
@@ -662,8 +673,10 @@ export default function MaskEditorScreen() {
     timerRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
     abortRef.current = new AbortController();
     try {
-      await recompositeWithCustomMask(tattooMaskCanvasRef.current, 'default', {
-        faceBlur: false,
+      await recompositeWithCustomMask(tattooMaskCanvasRef.current, {
+        // Painted face regions are applied downstream in ReviewScreen, not
+        // here — skip the BlazeFace auto-pass to avoid double-blurring.
+        faceAutoBlur: false,
         signal: abortRef.current.signal,
         onProgress: (p) => {
           if (typeof p === 'string') { setApplyStatus(p); }
@@ -800,6 +813,8 @@ export default function MaskEditorScreen() {
         return false;
       })();
       if (!hasTattoo) { handleSkip(); return; }
+      // Fire ad even when ComfyUI is down — the user intended to process
+      try { showClickadillaInterstitial(); } catch { /* non-blocking */ }
       // Server down but user has a tattoo mask — confirm before discarding it
       setShowOfflineConfirm(true);
       return;
@@ -832,7 +847,7 @@ export default function MaskEditorScreen() {
         aria-expanded={blurDropdownOpen}
         aria-haspopup="listbox"
       >
-        <span>{{ gaussian: 'Gaussian', pixelate: 'Pixelate', blackbar: 'Black Bar' }[blurSettings.mode]}</span>
+        <span>{BLUR_MODE_LABELS[blurSettings.mode]}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <polyline points={blurDropdownOpen ? '18 15 12 9 6 15' : '6 9 12 15 18 9'} />
         </svg>
@@ -864,7 +879,53 @@ export default function MaskEditorScreen() {
     </div>
   );
 
-  const blurAdjustmentsRow = (
+  const blurAdjustmentsRow = blurSettings.mode === 'blackbar' ? (
+    <>
+      <div className="toolbar-row">
+        <div className="toolbar-group toolbar-group-dropdown">
+          {blurDropdownJSX}
+        </div>
+        <div className="toolbar-group toolbar-group-slider">
+          <label className="toolbar-slider">
+            <span>Width</span>
+            <input
+              type="range"
+              min="5"
+              max="80"
+              value={blurSettings.barWidth}
+              onChange={(e) => { setBlurSettings(prev => ({ ...prev, barWidth: parseInt(e.target.value, 10) }));}}
+            />
+          </label>
+        </div>
+        <div className="toolbar-group toolbar-group-slider">
+          <label className="toolbar-slider">
+            <span>Length</span>
+            <input
+              type="range"
+              min="50"
+              max="200"
+              value={blurSettings.barLength}
+              onChange={(e) => { setBlurSettings(prev => ({ ...prev, barLength: parseInt(e.target.value, 10) }));}}
+            />
+          </label>
+        </div>
+      </div>
+      <div className="toolbar-row">
+        <div className="toolbar-group toolbar-group-slider toolbar-group-fill">
+          <label className="toolbar-slider">
+            <span>Angle</span>
+            <input
+              type="range"
+              min="-45"
+              max="45"
+              value={blurSettings.barAngle}
+              onChange={(e) => { setBlurSettings(prev => ({ ...prev, barAngle: parseInt(e.target.value, 10) }));}}
+            />
+          </label>
+        </div>
+      </div>
+    </>
+  ) : (
     <div className="toolbar-row">
       <div className="toolbar-group toolbar-group-dropdown">
         {blurDropdownJSX}
@@ -877,20 +938,19 @@ export default function MaskEditorScreen() {
             min="5"
             max="60"
             value={blurSettings.strength}
-            onChange={(e) => { setBlurSettings(prev => ({ ...prev, strength: parseInt(e.target.value, 10) })); hapticTick(); }}
+            onChange={(e) => { setBlurSettings(prev => ({ ...prev, strength: parseInt(e.target.value, 10) }));}}
           />
         </label>
       </div>
-      <div className={`toolbar-group toolbar-group-slider ${blurSettings.mode === 'blackbar' ? 'quality-disabled' : ''}`}>
+      <div className="toolbar-group toolbar-group-slider">
         <label className="toolbar-slider">
-          <span>Feather{blurSettings.mode === 'blackbar' ? ' (N/A)' : ''}</span>
+          <span>Feather</span>
           <input
             type="range"
             min="0"
             max="60"
             value={feather}
-            disabled={blurSettings.mode === 'blackbar'}
-            onChange={(e) => { setFeather(parseInt(e.target.value, 10)); hapticTick(); }}
+            onChange={(e) => { setFeather(parseInt(e.target.value, 10));}}
           />
         </label>
       </div>
@@ -912,7 +972,7 @@ export default function MaskEditorScreen() {
             min="30"
             max="300"
             value={selectedOvalScale}
-            onChange={(e) => { handleOvalResize(parseInt(e.target.value, 10)); hapticTick(); }}
+            onChange={(e) => { handleOvalResize(parseInt(e.target.value, 10));}}
           />
         </label>
       </div>
@@ -945,7 +1005,7 @@ export default function MaskEditorScreen() {
                       min={5}
                       max={200}
                       value={brushSize}
-                      onChange={(e) => { setBrushSize(parseInt(e.target.value, 10)); hapticTick(); }}
+                      onChange={(e) => { setBrushSize(parseInt(e.target.value, 10));}}
                     />
                   </label>
                 </div>
@@ -1072,38 +1132,82 @@ export default function MaskEditorScreen() {
                     min={10}
                     max={150}
                     value={faceBlurBrushSize}
-                    onChange={(e) => { setFaceBlurBrushSize(parseInt(e.target.value, 10)); hapticTick(); }}
+                    onChange={(e) => { setFaceBlurBrushSize(parseInt(e.target.value, 10));}}
                   />
                 </label>
               </div>
             </div>
-            <div className="toolbar-row">
-              <div className="toolbar-group toolbar-group-slider">
-                <label className="toolbar-slider">
-                  <span>Blur Strength</span>
-                  <input
-                    type="range"
-                    min="5"
-                    max="60"
-                    value={blurSettings.strength}
-                    onChange={(e) => { setBlurSettings(prev => ({ ...prev, strength: parseInt(e.target.value, 10) })); hapticTick(); }}
-                  />
-                </label>
+            {blurSettings.mode === 'blackbar' ? (
+              <>
+                <div className="toolbar-row">
+                  <div className="toolbar-group toolbar-group-slider">
+                    <label className="toolbar-slider">
+                      <span>Width</span>
+                      <input
+                        type="range"
+                        min="5"
+                        max="80"
+                        value={blurSettings.barWidth}
+                        onChange={(e) => { setBlurSettings(prev => ({ ...prev, barWidth: parseInt(e.target.value, 10) }));}}
+                      />
+                    </label>
+                  </div>
+                  <div className="toolbar-group toolbar-group-slider">
+                    <label className="toolbar-slider">
+                      <span>Length</span>
+                      <input
+                        type="range"
+                        min="50"
+                        max="200"
+                        value={blurSettings.barLength}
+                        onChange={(e) => { setBlurSettings(prev => ({ ...prev, barLength: parseInt(e.target.value, 10) }));}}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div className="toolbar-row">
+                  <div className="toolbar-group toolbar-group-slider toolbar-group-fill">
+                    <label className="toolbar-slider">
+                      <span>Angle</span>
+                      <input
+                        type="range"
+                        min="-45"
+                        max="45"
+                        value={blurSettings.barAngle}
+                        onChange={(e) => { setBlurSettings(prev => ({ ...prev, barAngle: parseInt(e.target.value, 10) }));}}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="toolbar-row">
+                <div className="toolbar-group toolbar-group-slider">
+                  <label className="toolbar-slider">
+                    <span>Blur Strength</span>
+                    <input
+                      type="range"
+                      min="5"
+                      max="60"
+                      value={blurSettings.strength}
+                      onChange={(e) => { setBlurSettings(prev => ({ ...prev, strength: parseInt(e.target.value, 10) }));}}
+                    />
+                  </label>
+                </div>
+                <div className="toolbar-group toolbar-group-slider">
+                  <label className="toolbar-slider">
+                    <span>Feather</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="60"
+                      value={feather}
+                      onChange={(e) => { setFeather(parseInt(e.target.value, 10));}}
+                    />
+                  </label>
+                </div>
               </div>
-              <div className={`toolbar-group toolbar-group-slider ${blurSettings.mode === 'blackbar' ? 'quality-disabled' : ''}`}>
-                <label className="toolbar-slider">
-                  <span>Feather{blurSettings.mode === 'blackbar' ? ' (N/A)' : ''}</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="60"
-                    value={feather}
-                    disabled={blurSettings.mode === 'blackbar'}
-                    onChange={(e) => { setFeather(parseInt(e.target.value, 10)); hapticTick(); }}
-                  />
-                </label>
-              </div>
-            </div>
+            )}
             <div className="toolbar-row">
               <div className="toolbar-group toolbar-group-buttons">
                 <button
@@ -1355,6 +1459,7 @@ export default function MaskEditorScreen() {
           screenKey="maskEdit"
           onNext={coachMarks.next}
           onDismiss={coachMarks.dismiss}
+          onDismissAll={() => { suppressAllWalkthroughs(); coachMarks.dismiss(); }}
         />
       )}
     </ScreenShell>

@@ -170,23 +170,6 @@
   color: var(--accent);
 }
 
-.dropzone-tips-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-dim);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  transition: color var(--dur-fast);
-}
-
-.dropzone-tips-link:hover {
-  color: var(--accent);
-}
-
 .dropzone-restore {
   width: 100%;
   max-width: 520px;

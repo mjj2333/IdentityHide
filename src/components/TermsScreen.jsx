@@ -14,12 +14,6 @@ export default function TermsScreen({ onBack }) {
         <h1 className="terms-title">Terms and Conditions</h1>
         <p className="terms-updated">Last updated: April 8, 2026</p>
 
-        <div className="terms-notice" role="note">
-          This document is a draft. Before relying on it, please have a
-          qualified attorney review it and confirm CSAM reporting obligations
-          and biometric data laws in your operating region.
-        </div>
-
         <section className="terms-section">
           <h2>1. Acceptance</h2>
           <p>

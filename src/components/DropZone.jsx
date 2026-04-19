@@ -1,11 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { usePipeline } from '../context/PipelineContext';
+import { useBatch } from '../context/BatchContext';
 import { useImagePipeline } from '../hooks/useImagePipeline';
-import { useCoachMarks } from '../hooks/useCoachMarks';
+import { useCoachMarks, suppressAllWalkthroughs, resetWalkthrough } from '../hooks/useCoachMarks';
 import CoachMark from './CoachMark';
 import ResolutionTierModal from './ResolutionTierModal';
 import { track } from '../utils/analytics';
 import { getSessionInfo, loadSession, clearSession } from '../utils/sessionStore';
+import TipsToggle from './TipsToggle';
 import '../styles/DropZone.css';
 
 // Format ms delta as a terse relative time for the restore banner.
@@ -31,6 +33,7 @@ function screenLabel(screen) {
 
 export default function DropZone() {
   const { setOriginalFile, setScreen, restoreSession, setWarning, setSelectedTierMP } = usePipeline();
+  const { seedFiles } = useBatch();
   const { runPipeline } = useImagePipeline();
   const [dragActive, setDragActive] = useState(false);
   const [savedSession, setSavedSession] = useState(null);
@@ -42,8 +45,12 @@ export default function DropZone() {
   const cameraInputRef = useRef(null);
   const dropTargetRef = useRef(null);
 
+  const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+
   const COACH_STEPS = [
-    { targetRef: dropTargetRef, position: 'top', body: 'Drop an image, click to browse, or paste from clipboard. On mobile, tap the camera button below.' },
+    { targetRef: dropTargetRef, position: 'top', body: isMobile
+      ? 'Tap to choose photos from your gallery, or use the camera button below to take one.'
+      : 'Drop an image, click to browse, or paste from clipboard.' },
   ];
   const { activeStep, totalSteps, next, dismiss, isActive, restart } = useCoachMarks('drop', COACH_STEPS.length);
 
@@ -83,6 +90,18 @@ export default function DropZone() {
     img.src = url;
   }), []);
 
+  const handleMultipleFiles = useCallback((files) => {
+    const imageFiles = files.filter(f => f.type.startsWith('image/') && f.size <= MAX_FILE_SIZE);
+    if (imageFiles.length === 0) return;
+    const capped = imageFiles.slice(0, 20);
+    if (imageFiles.length > 20) {
+      setWarning('Maximum 20 images per batch. First 20 selected.');
+    }
+    track('batch_upload', { count: capped.length });
+    seedFiles(capped);
+    setScreen('batch-grid');
+  }, [setScreen, setWarning]);
+
   const handleFile = useCallback(async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
     if (file.size > MAX_FILE_SIZE) {
@@ -102,6 +121,10 @@ export default function DropZone() {
     setPendingUpload({ file, width: size.width, height: size.height });
   }, [setOriginalFile, runPipeline, readImageSize]);
 
+  // ResolutionTierModal emits `(mp, selectedKey)` on confirm; we only need
+  // `mp` here because the modal already persists the key to localStorage
+  // internally via saveTierKey. See ResolutionTierModal's JSDoc for the
+  // full contract before wiring up a new caller.
   const handleTierSelect = useCallback(async (tierMP) => {
     if (!pendingUpload) return;
     const { file } = pendingUpload;
@@ -119,9 +142,14 @@ export default function DropZone() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    const file = e.dataTransfer?.files?.[0];
-    if (file) handleFile(file);
-  }, [handleFile]);
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    if (files.length > 1) {
+      handleMultipleFiles(Array.from(files));
+    } else {
+      handleFile(files[0]);
+    }
+  }, [handleFile, handleMultipleFiles]);
 
   const onDragOver = useCallback((e) => {
     e.preventDefault();
@@ -137,14 +165,19 @@ export default function DropZone() {
 
   const onFileSelect = useCallback((e) => {
     const input = e.target;
-    const file = input.files?.[0];
+    const files = Array.from(input.files || []);
     // Reset the input so picking the same file a second time still fires
     // onChange. Without this, cancelling the resolution-tier modal and then
     // re-selecting the same image silently does nothing (browser sees no
     // value change and skips the event).
     input.value = '';
-    if (file) handleFile(file);
-  }, [handleFile]);
+    if (files.length === 0) return;
+    if (files.length > 1) {
+      handleMultipleFiles(files);
+    } else {
+      handleFile(files[0]);
+    }
+  }, [handleFile, handleMultipleFiles]);
 
   // Listen for paste events at the document level so the user can paste an
   // image without having to click into a specific element first. Attaching to
@@ -182,7 +215,7 @@ export default function DropZone() {
     } catch (e) {
       console.warn('[sessionStore] restore failed:', e?.message || e);
       setSavedSession(null);
-      setWarning('Couldn\'t restore your previous session — the saved data may be corrupt. Starting fresh.');
+      setWarning({ message: 'Couldn\'t restore your previous session — the saved data may be corrupt. Starting fresh.', sticky: true });
       // Best-effort cleanup of the corrupt entry so the next visit doesn't
       // offer to restore it again.
       clearSession().catch(() => {});
@@ -198,6 +231,10 @@ export default function DropZone() {
 
   return (
     <main className="dropzone-screen">
+      <TipsToggle active={isActive} onClick={() => {
+        if (isActive) { suppressAllWalkthroughs(); dismiss(); }
+        else { resetWalkthrough(); restart(); }
+      }} />
       <div className="dropzone-header">
         <h1 className="dropzone-title" onClick={handleLogoTap}>
           <img className="dropzone-logo dropzone-logo-dark" src="/logo-dark-fixed.png" alt="IdentityHide" />
@@ -243,7 +280,7 @@ export default function DropZone() {
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
           </div>
-          <p className="dropzone-label">Drop an image here or click to browse</p>
+          <p className="dropzone-label">{isMobile ? 'Tap to choose photos' : 'Drop photos here or click to browse'}</p>
         </div>
       </button>
 
@@ -251,9 +288,10 @@ export default function DropZone() {
         ref={fileInputRef}
         type="file"
         accept="image/*"
+        multiple
         onChange={onFileSelect}
         className="dropzone-input"
-        aria-label="Choose an image file"
+        aria-label="Choose image files"
       />
       <input
         ref={cameraInputRef}
@@ -316,16 +354,14 @@ export default function DropZone() {
           </svg>
           Privacy
         </a>
-        {!isActive && (
-          <button className="dropzone-tips-link" onClick={restart}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            Show tips
-          </button>
-        )}
+        <a href="/faq" className="dropzone-feedback-link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          FAQ
+        </a>
       </div>
 
       {isActive && COACH_STEPS[activeStep] && (
@@ -336,6 +372,7 @@ export default function DropZone() {
           screenKey="drop"
           onNext={next}
           onDismiss={dismiss}
+          onDismissAll={() => { suppressAllWalkthroughs(); dismiss(); }}
         />
       )}
 

@@ -12,12 +12,7 @@ export default function PrivacyScreen({ onBack }) {
     <ScreenShell backAction={onBack} backLabel="Back">
       <div className="terms-container">
         <h1 className="terms-title">Privacy Policy</h1>
-        <p className="terms-updated">Last updated: April 9, 2026</p>
-
-        <div className="terms-notice" role="note">
-          This document is a draft. Please have a qualified attorney review it
-          before relying on it as a binding privacy policy.
-        </div>
+        <p className="terms-updated">Last updated: April 17, 2026</p>
 
         <section className="terms-section">
           <h2>1. Overview</h2>
@@ -68,12 +63,14 @@ export default function PrivacyScreen({ onBack }) {
           <h2>4. Local Storage</h2>
           <p>
             To let you resume interrupted work, IdentityHide stores a temporary
-            copy of your in-progress session in your browser&apos;s local storage
+            copy of your in-progress session &mdash; your image, any mask edits
+            and blur settings, and the face-detection coordinates used to draw
+            those edits &mdash; in your browser&apos;s local storage
             (IndexedDB). This data:
           </p>
           <ul>
             <li>Never leaves your device</li>
-            <li>Is automatically discarded after 24 hours</li>
+            <li>Is automatically discarded after 4 hours</li>
             <li>Can be cleared at any time by clearing your browser storage</li>
           </ul>
         </section>
@@ -155,7 +152,7 @@ export default function PrivacyScreen({ onBack }) {
             </li>
             <li>
               <strong>Session data:</strong> Stored locally on your device for up
-              to 24 hours, then automatically discarded.
+              to 4 hours, then automatically discarded.
             </li>
             <li>
               <strong>Analytics:</strong> Aggregated, anonymous metrics retained

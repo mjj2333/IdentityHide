@@ -24,28 +24,9 @@ export default function ThemeToggle() {
 
   return (
     <button
+      className="chrome-toggle chrome-toggle--theme"
       onClick={toggle}
       aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-      style={{
-        position: 'fixed',
-        top: 8,
-        right: 8,
-        zIndex: 'var(--z-chrome)',
-        width: 36,
-        height: 36,
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-sm)',
-        background: 'var(--bg-elevated)',
-        color: 'var(--text)',
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: 14,
-        lineHeight: 1,
-        padding: 0,
-        transition: 'background 0.15s, border-color 0.15s',
-      }}
     >
       {theme === 'dark' ? (
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

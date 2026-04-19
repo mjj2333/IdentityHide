@@ -26,6 +26,15 @@ function disposeModel() {
   modelLoading = null;
 }
 
+// Vite HMR — dispose the cached BlazeFace model before the module is
+// replaced so each dev reload doesn't leak another WebGL context's worth
+// of textures. Production bundles have no HMR, so this is a no-op there.
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    disposeModel();
+  });
+}
+
 async function loadModel() {
   if (model) return model;
   if (modelLoading) return modelLoading;
@@ -132,15 +141,23 @@ async function detectMultiScale(faceModel, canvas) {
   tileCanvas.height = tileH;
   const tileCtx = tileCanvas.getContext('2d');
 
-  for (const [tx, ty] of tiles) {
-    tileCtx.drawImage(canvas, tx, ty, tileW, tileH, 0, 0, tileW, tileH);
-    const tilePreds = await faceModel.estimateFaces(tileCanvas, false);
-    addPredictions(tilePreds, tx, ty);
+  try {
+    for (const [tx, ty] of tiles) {
+      tileCtx.drawImage(canvas, tx, ty, tileW, tileH, 0, 0, tileW, tileH);
+      // Per-tile timeout prevents a hung WebGL context from blocking forever.
+      const tilePreds = await Promise.race([
+        faceModel.estimateFaces(tileCanvas, false),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Tile detection timed out')), 10000)
+        ),
+      ]);
+      addPredictions(tilePreds, tx, ty);
+    }
+  } finally {
+    // Free tile canvas even if a tile throws (e.g. WebGL context loss)
+    tileCanvas.width = 0;
+    tileCanvas.height = 0;
   }
-
-  // Free tile canvas
-  tileCanvas.width = 0;
-  tileCanvas.height = 0;
 
   console.log(`[FaceDetect] ${raw.length} raw detections (1 full + ${tiles.length} tiles) → NMS`);
   return nms(raw, 0.3);

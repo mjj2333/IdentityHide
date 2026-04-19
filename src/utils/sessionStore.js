@@ -8,6 +8,13 @@ const DB_VERSION = 1;
 const STORE = 'session';
 const SESSION_KEY = 'current';
 
+// How long a saved session is allowed to persist before it's auto-discarded
+// on next load. This is a privacy trade-off: long enough to survive a browser
+// crash / accidental tab close and let the user resume the same work session,
+// short enough that sensitive uploads don't linger overnight on a shared or
+// lost device. 4h covers typical "got interrupted, back after lunch" flows.
+const SESSION_TTL_MS = 4 * 60 * 60 * 1000;
+
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -27,17 +34,24 @@ function canvasToBlob(canvas) {
 function blobToCanvas(blob) {
   return new Promise((resolve) => {
     if (!blob) { resolve(null); return; }
+    // Use img.decode() so the URL revoke lives in a finally block — the
+    // previous onload/onerror pair could leak the object URL if neither
+    // fired (e.g., tab teardown races the image decode). With decode(),
+    // every completion path (success, failure, or settle-during-teardown)
+    // runs the revoke exactly once.
+    const url = URL.createObjectURL(blob);
     const img = new Image();
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = img.width;
-      c.height = img.height;
-      c.getContext('2d').drawImage(img, 0, 0);
-      URL.revokeObjectURL(img.src);
-      resolve(c);
-    };
-    img.onerror = () => { URL.revokeObjectURL(img.src); resolve(null); };
-    img.src = URL.createObjectURL(blob);
+    img.src = url;
+    img.decode()
+      .then(() => {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        c.getContext('2d').drawImage(img, 0, 0);
+        resolve(c);
+      })
+      .catch(() => resolve(null))
+      .finally(() => URL.revokeObjectURL(url));
   });
 }
 
@@ -48,7 +62,7 @@ function blobToCanvas(blob) {
  * the user on every auto-save tick.
  */
 export async function saveSession({ originalFile, screen, blurSettings, feather, detections,
-  editDets, workingScale, tierMP, tattooMaskCanvas, strippedCanvas, inpaintedCanvas, outputCanvas,
+  editDets, tierMP, tattooMaskCanvas, strippedCanvas, inpaintedCanvas, outputCanvas,
   originalCanvas, fullResCanvas }) {
   const [tattooBlob, strippedBlob, inpaintedBlob, outputBlob, originalBlob, fullResBlob] =
     await Promise.all([
@@ -67,7 +81,6 @@ export async function saveSession({ originalFile, screen, blurSettings, feather,
     feather,
     detections,
     editDets,
-    workingScale,
     tierMP,
     tattooMaskBlob: tattooBlob,
     strippedBlob,
@@ -110,8 +123,8 @@ export async function loadSession() {
 
   if (!data) return null;
 
-  // Discard sessions older than 24 hours
-  if (Date.now() - data.savedAt > 24 * 60 * 60 * 1000) {
+  // Discard sessions older than the TTL
+  if (Date.now() - data.savedAt > SESSION_TTL_MS) {
     await clearSession();
     return null;
   }
@@ -133,7 +146,6 @@ export async function loadSession() {
     feather: data.feather,
     detections: data.detections || [],
     editDets: data.editDets || [],
-    workingScale: data.workingScale || 1,
     tierMP: data.tierMP || 1,
     tattooMaskCanvas,
     strippedCanvas,
@@ -158,7 +170,7 @@ export async function getSessionInfo() {
     const data = await new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = reject; });
     db.close();
     if (!data) return null;
-    if (Date.now() - data.savedAt > 24 * 60 * 60 * 1000) return null;
+    if (Date.now() - data.savedAt > SESSION_TTL_MS) return null;
     return {
       filename: data.originalFile?.name || null,
       screen: data.screen || null,

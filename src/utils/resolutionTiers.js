@@ -5,15 +5,17 @@
  * but longer processing time.
  */
 
+// Two tiers only: Quick (1 MP, fast + small) and Original (full resolution).
+// mp: Infinity on Original means "no downscale cap" — downscaleToMegapixels
+// and estimateDimensions both handle Infinity naturally (Math.min collapses
+// to srcMP; the `currentMP <= targetMP` branch fires with ALIGN-16 rounding).
 export const TIERS = [
-  { key: 'fast',     label: 'Fast',     mp: 1,  desc: 'Social media, messaging',   time: '~1 min' },
-  { key: 'balanced', label: 'Balanced', mp: 2,  desc: 'Sharing, small prints',     time: '~1.5 min' },
-  { key: 'high',     label: 'High',     mp: 4,  desc: 'Prints, large displays',    time: '~3 min' },
-  { key: 'native',   label: 'Native',   mp: 12, desc: 'Max detail, pro print',     time: '~5 min' },
+  { key: 'fast',   label: 'Quick',    mp: 1,        desc: 'Good for texting & social posts',              time: '~1 min' },
+  { key: 'native', label: 'Original', mp: Infinity, desc: 'Full resolution — best for print & archive', time: '~3–5 min' },
 ];
 
 export const DEFAULT_TIER_KEY = 'fast';
-export const MAX_TIER_MP = 12;
+export const MAX_TIER_MP = Infinity;
 
 const STORAGE_KEY = 'ih_tier';
 
@@ -26,9 +28,11 @@ export function getAvailableTiers(srcWidth, srcHeight) {
   const srcMP = (srcWidth * srcHeight) / 1_000_000;
   return TIERS.map((t) => ({
     ...t,
-    // 0.1 MP tolerance so a 1920×1080 (~2.07 MP) upload still enables the
-    // 2 MP tier without floating-point weirdness getting in the way.
-    available: t.mp <= srcMP + 0.1,
+    // Original (mp === Infinity) is always available — it's just "don't
+    // downscale", so it works even for tiny source images. For fixed-MP
+    // tiers the 0.1 MP tolerance absorbs floating-point weirdness around
+    // common sizes like 1920×1080 (~2.07 MP).
+    available: t.mp === Infinity || t.mp <= srcMP + 0.1,
     effectiveMP: Math.min(t.mp, srcMP),
   }));
 }

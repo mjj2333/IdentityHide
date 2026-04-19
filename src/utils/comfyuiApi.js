@@ -24,6 +24,9 @@ const FALLBACK_POLL_INTERVAL = 500;
 // "Processing..." forever if ComfyUI accepts the queue but never reports
 // completion. 5 minutes is comfortably longer than any normal Flux inpaint.
 const FALLBACK_POLL_MAX_MS = 5 * 60 * 1000;
+// Per-fetch ceiling inside fallbackPoll so a single slow/hung connection
+// doesn't block the overall-timeout check (which only runs between ticks).
+const POLL_FETCH_TIMEOUT_MS = 5000;
 const CONNECTION_TEST_TIMEOUT = 5000;
 const PREWARM_CANVAS_SIZE = 128;
 
@@ -56,10 +59,30 @@ function makeClientId() {
 const CLIENT_ID = makeClientId();
 
 /**
+ * Best-effort cancel of a queued/running prompt. Fire-and-forget — errors
+ * are swallowed because the caller is already in an error/abort path.
+ * Tries to delete from queue first (pending), then interrupts if running.
+ */
+function cancelPrompt(promptId) {
+  // Remove from pending queue
+  fetch(withAuth(`${baseUrl}/queue`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ delete: [promptId] }),
+  }).catch(() => {});
+  // Interrupt if currently running
+  fetch(withAuth(`${baseUrl}/interrupt`), { method: 'POST' }).catch(() => {});
+  console.warn(`[ComfyUI] Cancelled prompt ${promptId}`);
+}
+
+/**
  * Upload an image (canvas) to ComfyUI's /upload/image endpoint.
  * Returns the filename assigned by ComfyUI.
+ * Pass `signal` to make the upload cancellable — without it, hitting Cancel
+ * mid-upload still sends the full image and consumes VRAM on the server side
+ * before the caller's abort check fires.
  */
-export async function uploadImage(canvas, filename = 'input.png') {
+export async function uploadImage(canvas, filename = 'input.png', { signal } = {}) {
   const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
   const form = new FormData();
   form.append('image', blob, filename);
@@ -67,6 +90,7 @@ export async function uploadImage(canvas, filename = 'input.png') {
   const res = await fetch(withAuth(`${baseUrl}/upload/image`), {
     method: 'POST',
     body: form,
+    signal,
   });
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
   const data = await res.json();
@@ -76,8 +100,9 @@ export async function uploadImage(canvas, filename = 'input.png') {
 /**
  * Upload a mask canvas to ComfyUI.
  * ComfyUI expects masks as images — white = masked region.
+ * Pass `signal` to forward cancellation down to the underlying fetch.
  */
-export async function uploadMask(maskCanvas, filename = 'mask.png') {
+export async function uploadMask(maskCanvas, filename = 'mask.png', { signal } = {}) {
   // Convert alpha-based mask to RGB white-on-black for ComfyUI
   const { width, height } = maskCanvas;
   const c = document.createElement('canvas');
@@ -94,7 +119,7 @@ export async function uploadMask(maskCanvas, filename = 'mask.png') {
     dst.data[i + 3] = 255;
   }
   ctx.putImageData(dst, 0, 0);
-  return uploadImage(c, filename);
+  return uploadImage(c, filename, { signal });
 }
 
 /**
@@ -108,8 +133,9 @@ export async function queuePrompt(workflow) {
     body: JSON.stringify({ prompt: workflow, client_id: CLIENT_ID }),
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Queue failed: ${res.status} — ${text}`);
+    const text = await res.text().catch(() => '');
+    console.warn(`[ComfyUI] Queue failed: ${res.status} — ${text}`);
+    throw new Error(`Queue failed (${res.status})`);
   }
   return res.json(); // { prompt_id, number, node_errors }
 }
@@ -156,8 +182,9 @@ export async function queueAndWait(workflow, { onProgress, signal } = {}) {
   });
   if (!res.ok) {
     try { ws?.close(); } catch {}
-    const text = await res.text();
-    throw new Error(`Queue failed: ${res.status} — ${text}`);
+    const text = await res.text().catch(() => '');
+    console.warn(`[ComfyUI] Queue failed: ${res.status} — ${text}`);
+    throw new Error(`Queue failed (${res.status})`);
   }
   const { prompt_id } = await res.json();
   console.log(`[ComfyUI] Queued prompt: ${prompt_id}`);
@@ -185,7 +212,10 @@ function waitViaWebSocket(ws, promptId, { onProgress, signal } = {}) {
     };
 
     if (signal) {
-      signal.addEventListener('abort', () => finish(new Error('Cancelled'), true), { once: true });
+      signal.addEventListener('abort', () => {
+        cancelPrompt(promptId);
+        finish(new Error('Cancelled'), true);
+      }, { once: true });
     }
 
     let highWater = 0;
@@ -229,7 +259,8 @@ function waitViaWebSocket(ws, promptId, { onProgress, signal } = {}) {
           }
 
           case 'execution_error': {
-            finish(new Error('ComfyUI error: ' + (d.exception_message || 'Execution failed')), true);
+            console.warn('[ComfyUI] Execution error:', d.exception_message, d);
+            finish(new Error('Processing failed — please try again'), true);
             break;
           }
         }
@@ -266,7 +297,8 @@ async function fetchHistory(promptId) {
     if (data[promptId]) {
       const entry = data[promptId];
       if (entry.status?.status_str === 'error') {
-        throw new Error('ComfyUI workflow failed: ' + JSON.stringify(entry.status));
+        console.warn('[ComfyUI] Workflow failed:', entry.status);
+        throw new Error('Processing failed — please try again');
       }
       return entry;
     }
@@ -284,26 +316,52 @@ async function fallbackPoll(promptId, { onProgress, signal, pollInterval = FALLB
   // Coarse heartbeat fraction so the progress bar advances even though we
   // can't see real KSampler step events on the polling path.
   let heartbeat = 0.1;
+
+  // Per-fetch timeout combined with the caller's cancel signal. Without a
+  // per-fetch cap a hung ComfyUI connection blocks the loop indefinitely
+  // and the FALLBACK_POLL_MAX_MS overall-limit check at the top never
+  // fires (it only runs between iterations).
+  const pollSignal = () => {
+    const timeout = AbortSignal.timeout(POLL_FETCH_TIMEOUT_MS);
+    return signal ? AbortSignal.any([signal, timeout]) : timeout;
+  };
+
   while (true) {
-    if (signal?.aborted) throw new Error('Cancelled');
+    if (signal?.aborted) {
+      cancelPrompt(promptId);
+      throw new Error('Cancelled');
+    }
     if (Date.now() - startedAt > FALLBACK_POLL_MAX_MS) {
+      cancelPrompt(promptId);
       throw new Error('ComfyUI did not return a result within 5 minutes');
     }
 
-    const res = await fetch(withAuth(`${baseUrl}/history/${promptId}`));
+    let res;
+    try {
+      res = await fetch(withAuth(`${baseUrl}/history/${promptId}`), { signal: pollSignal() });
+    } catch (err) {
+      // Translate caller-abort into the loop's "Cancelled" error so the
+      // user-visible message doesn't read "The operation was aborted".
+      if (signal?.aborted) {
+        cancelPrompt(promptId);
+        throw new Error('Cancelled');
+      }
+      throw new Error(`History poll failed: ${err.message || 'timeout'}`);
+    }
     if (!res.ok) throw new Error(`History poll failed: ${res.status}`);
     const data = await res.json();
 
     if (data[promptId]) {
       const entry = data[promptId];
       if (entry.status?.status_str === 'error') {
-        throw new Error('ComfyUI workflow failed: ' + JSON.stringify(entry.status));
+        console.warn('[ComfyUI] Workflow failed:', entry.status);
+        throw new Error('Processing failed — please try again');
       }
       return entry;
     }
 
     try {
-      const qRes = await fetch(withAuth(`${baseUrl}/queue`));
+      const qRes = await fetch(withAuth(`${baseUrl}/queue`), { signal: pollSignal() });
       const qData = await qRes.json();
       const running = qData.queue_running?.find(q => q[1] === promptId);
       const pending = qData.queue_pending?.findIndex(q => q[1] === promptId);
@@ -315,7 +373,7 @@ async function fallbackPoll(promptId, { onProgress, signal, pollInterval = FALLB
       } else if (pending >= 0 && onProgress) {
         onProgress({ message: `Queued (position ${pending + 1})...`, fraction: 0.1 });
       }
-    } catch { /* ignore queue check errors */ }
+    } catch { /* ignore queue check errors (incl. per-fetch timeout) */ }
 
     await new Promise(r => setTimeout(r, pollInterval));
   }

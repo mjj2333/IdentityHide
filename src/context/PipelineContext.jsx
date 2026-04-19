@@ -10,7 +10,7 @@ export function PipelineProvider({ children }) {
   const [metadata, setMetadata] = useState(null);
   const [detections, setDetections] = useState([]);
   const [detectionToggles, setDetectionToggles] = useState([]);
-  const [blurSettings, setBlurSettings] = useState({ mode: 'gaussian', strength: 20 });
+  const [blurSettings, setBlurSettings] = useState({ mode: 'gaussian', strength: 20, barWidth: 20, barLength: 110, barAngle: 0 });
   const [feather, setFeather] = useState(0);
   const [brushSettings, setBrushSettings] = useState({ tool: 'brush', size: 30 });
   const [status, setStatus] = useState('idle');
@@ -30,7 +30,6 @@ export function PipelineProvider({ children }) {
   const samScaleRef = useRef(null);
   const inpaintedCanvasRef = useRef(null);
   const fullResCanvasRef = useRef(null);
-  const workingScaleRef = useRef(1);
   const faceBlurCanvasRef = useRef(null);
   const tattooMaskDirtyRef = useRef(true);
   const [editDets, setEditDets] = useState([]);
@@ -53,7 +52,7 @@ export function PipelineProvider({ children }) {
     setMetadata(null);
     setDetections([]);
     setDetectionToggles([]);
-    setBlurSettings({ mode: 'gaussian', strength: 20 });
+    setBlurSettings({ mode: 'gaussian', strength: 20, barWidth: 20, barLength: 110, barAngle: 0 });
     setFeather(0);
     setBrushSettings({ tool: 'brush', size: 30 });
     setStatus('idle');
@@ -61,7 +60,6 @@ export function PipelineProvider({ children }) {
     setWarning(null);
     setSelectedTierMP(getTierMP(getSavedTierKey()));
     samScaleRef.current = null;
-    workingScaleRef.current = 1;
     tattooMaskDirtyRef.current = true;
     setEditDets([]);
     setEditorReturnMode(null);
@@ -85,7 +83,6 @@ export function PipelineProvider({ children }) {
           feather,
           detections,
           editDets,
-          workingScale: workingScaleRef.current,
           tierMP: selectedTierMP,
           tattooMaskCanvas: tattooMaskCanvasRef.current,
           strippedCanvas: strippedCanvasRef.current,
@@ -100,11 +97,12 @@ export function PipelineProvider({ children }) {
         if (!saveFailedRef.current) {
           saveFailedRef.current = true;
           const quota = e?.name === 'QuotaExceededError';
-          setWarning(
-            quota
+          setWarning({
+            message: quota
               ? 'Auto-save disabled — browser storage is full. Your current work is safe but won\'t survive a page reload.'
-              : 'Auto-save failed — your current work is safe but won\'t survive a page reload.'
-          );
+              : 'Auto-save failed — your current work is safe but won\'t survive a page reload.',
+            sticky: true,
+          });
         }
       }
     }, 1000);
@@ -113,14 +111,13 @@ export function PipelineProvider({ children }) {
 
   const restoreSession = useCallback((session) => {
     setOriginalFile(session.originalFile);
-    setBlurSettings(session.blurSettings || { mode: 'gaussian', strength: 20 });
+    setBlurSettings(session.blurSettings || { mode: 'gaussian', strength: 20, barWidth: 20, barLength: 110, barAngle: 0 });
     setFeather(session.feather || 0);
     setDetections(session.detections || []);
     setEditDets(session.editDets || []);
     // Sessions saved before resolution tiers existed have no tierMP — default
     // to 1 MP, which matches the old hardcoded WORKING_MP behaviour.
     setSelectedTierMP(session.tierMP || 1);
-    workingScaleRef.current = session.workingScale || 1;
     if (session.strippedCanvas) strippedCanvasRef.current = session.strippedCanvas;
     if (session.originalCanvas) originalCanvasRef.current = session.originalCanvas;
     if (session.outputCanvas) outputCanvasRef.current = session.outputCanvas;
@@ -155,7 +152,6 @@ export function PipelineProvider({ children }) {
     samScaleRef,
     inpaintedCanvasRef,
     fullResCanvasRef,
-    workingScaleRef,
     faceBlurCanvasRef,
     tattooMaskDirtyRef,
     editDets, setEditDets,

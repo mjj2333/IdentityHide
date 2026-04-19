@@ -1,56 +1,27 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import ConfirmModal from './ConfirmModal';
 
-const EVENT_LABELS = {
-  app_loaded: 'App Loaded',
-  image_uploaded: 'Image Uploaded',
-  mask_editor_entered: 'Mask Editor',
-  apply_clicked: 'Apply Clicked',
-  skip_clicked: 'Skip Clicked',
-  review_entered: 'Review Screen',
-  export_completed: 'Export Completed',
-  tattoo_mask_painted: 'Tattoo Mask Painted',
-  face_blur_configured: 'Face Blur Configured',
-  blur_mode_changed: 'Blur Mode Changed',
-  comfyui_completed: 'ComfyUI Completed',
-  comfyui_failed: 'ComfyUI Failed',
-  edit_masks_revisited: 'Edit Masks Revisited',
-  start_over: 'Process Another Image',
-};
-
-const FUNNEL_ORDER = [
-  'app_loaded', 'image_uploaded', 'mask_editor_entered',
-  'apply_clicked', 'review_entered', 'export_completed',
+const FUNNEL_STEPS = [
+  { key: 'app_loaded', label: 'Visited', icon: '\u{1F310}' },
+  { key: 'image_uploaded', label: 'Uploaded', icon: '\u{1F4F7}' },
+  { key: 'apply_clicked', label: 'Applied', icon: '\u{2705}' },
+  { key: 'export_completed', label: 'Exported', icon: '\u{1F4E5}' },
 ];
-
-function formatEvent(key) {
-  return EVENT_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
-// Single writer for the admin session token. sessionStorage is the canonical
-// store; React state mirrors it for re-render purposes only. Always go through
-// these helpers so the two can't drift.
-const SESSION_KEY = 'admin_token';
 
 export default function AdminDashboard({ onBack }) {
   const [password, setPassword] = useState('');
-  const [sessionToken, setSessionTokenState] = useState(() => sessionStorage.getItem(SESSION_KEY) || '');
-  const setSessionToken = useCallback((token) => {
-    if (token) {
-      sessionStorage.setItem(SESSION_KEY, token);
-    } else {
-      sessionStorage.removeItem(SESSION_KEY);
-    }
-    setSessionTokenState(token || '');
-  }, []);
-  // `authed` is derived from token presence — no separate setter, no drift.
+  // Token lives in memory only — never persisted to storage. Page refresh /
+  // tab reopen requires re-auth. Trades a small UX cost for eliminating the
+  // XSS-token-exfiltration path.
+  const [sessionToken, setSessionToken] = useState('');
   const authed = !!sessionToken;
   const [data, setData] = useState(null);
   const [feedback, setFeedback] = useState(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [chartMode, setChartMode] = useState('events');
+  const [chartMode, setChartMode] = useState('sessions');
   const [pendingDeleteId, setPendingDeleteId] = useState(null);
 
   const deleteFeedback = useCallback(async (id) => {
@@ -60,11 +31,8 @@ export default function AdminDashboard({ onBack }) {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
         body: JSON.stringify({ action: 'delete', id }),
       });
-      if (res.ok) {
-        setFeedback(prev => prev ? prev.filter(fb => fb.id !== id) : prev);
-      } else {
-        setError('Failed to delete feedback');
-      }
+      if (res.ok) setFeedback(prev => prev ? prev.filter(fb => fb.id !== id) : prev);
+      else setError('Failed to delete feedback');
     } catch (err) {
       setError('Failed to delete feedback: ' + err.message);
     } finally {
@@ -87,17 +55,18 @@ export default function AdminDashboard({ onBack }) {
           body: JSON.stringify({ action: 'list' }),
         }),
       ]);
-      if (statsRes.status === 401) {
+      if (statsRes.status === 401) { setSessionToken(''); setError('Invalid password'); return; }
+      if (statsRes.status === 429) {
         setSessionToken('');
-        setError('Invalid password');
+        const retryAfter = parseInt(statsRes.headers.get('Retry-After') || '0', 10);
+        const mins = retryAfter > 0 ? Math.ceil(retryAfter / 60) : null;
+        setError(mins ? `Too many failed attempts. Try again in ~${mins} min.` : 'Too many failed attempts. Try again later.');
         return;
       }
       if (!statsRes.ok) throw new Error(`Server error ${statsRes.status}`);
       const json = await statsRes.json();
       setData(json);
-      if (fbRes.ok) {
-        setFeedback(await fbRes.json());
-      }
+      if (fbRes.ok) setFeedback(await fbRes.json());
       setSessionToken(pw);
     } catch (err) {
       setError(err.message);
@@ -106,23 +75,12 @@ export default function AdminDashboard({ onBack }) {
     }
   }, []);
 
-  useEffect(() => {
-    if (authed && sessionToken) fetchStats(sessionToken);
-  }, []);
 
-  const handleLogin = (e) => {
-    e.preventDefault();
-    fetchStats(password);
-  };
+
+  const handleLogin = (e) => { e.preventDefault(); fetchStats(password); };
 
   if (authed && !data && loading) {
-    return (
-      <div className="admin-dashboard">
-        <div className="admin-login">
-          <h2>Loading...</h2>
-        </div>
-      </div>
-    );
+    return <div className="admin-dashboard"><div className="admin-login"><h2>Loading...</h2></div></div>;
   }
 
   if (!authed || !data) {
@@ -131,18 +89,8 @@ export default function AdminDashboard({ onBack }) {
         <div className="admin-login">
           <h2>Admin Dashboard</h2>
           <form onSubmit={handleLogin}>
-            <input
-              type="password"
-              placeholder="Password"
-              aria-label="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="off"
-              autoFocus
-            />
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? 'Loading...' : 'Login'}
-            </button>
+            <input type="password" placeholder="Password" aria-label="Password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" autoFocus />
+            <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? 'Loading...' : 'Login'}</button>
           </form>
           {error && <p className="admin-error">{error}</p>}
         </div>
@@ -152,20 +100,31 @@ export default function AdminDashboard({ onBack }) {
 
   const { periods, funnel, daily, features, prev_periods } = data;
   const maxDaily = Math.max(...daily.map(d => chartMode === 'sessions' ? d.sessions : d.events), 1);
-  const funnelMax = Math.max(...Object.values(funnel), 1);
+  const funnelMax = Math.max(...FUNNEL_STEPS.map(s => funnel[s.key] || 0), 1);
 
-  function trendIndicator(current, previous, label) {
+  // Derive key metrics
+  const sessions7d = periods['7d'].unique_sessions;
+  const sessions30d = periods['30d'].unique_sessions;
+  const exports30d = funnel['export_completed'] || 0;
+  const uploads30d = funnel['image_uploaded'] || 0;
+  const conversionRate = uploads30d > 0 ? Math.round((exports30d / uploads30d) * 100) : 0;
+  const comfyOk = features?.comfyui?.completed || 0;
+  const comfyFail = features?.comfyui?.failed || 0;
+  const comfyTotal = comfyOk + comfyFail;
+  const comfyRate = comfyTotal > 0 ? Math.round((comfyOk / comfyTotal) * 100) : null;
+  const mobileCount = features?.device?.mobile || 0;
+  const desktopCount = features?.device?.desktop || 0;
+  const deviceTotal = mobileCount + desktopCount;
+  const mobilePct = deviceTotal > 0 ? Math.round((mobileCount / deviceTotal) * 100) : 0;
+
+  function trend(current, previous) {
     if (!previous || previous === 0) return null;
     const pct = Math.round(((current - previous) / previous) * 100);
     if (pct === 0) return null;
     const up = pct > 0;
-    const direction = up ? 'up' : 'down';
     return (
-      <span
-        className={`admin-summary-trend ${up ? 'trend-up' : 'trend-down'}`}
-        aria-label={`${direction} ${Math.abs(pct)} percent${label ? ` ${label}` : ''}`}
-      >
-        <span aria-hidden="true">{up ? '\u2191' : '\u2193'}</span> {Math.abs(pct)}%{label && <span className="trend-label"> {label}</span>}
+      <span className={`admin-kpi-trend ${up ? 'trend-up' : 'trend-down'}`}>
+        {up ? '\u2191' : '\u2193'} {Math.abs(pct)}%
       </span>
     );
   }
@@ -173,156 +132,73 @@ export default function AdminDashboard({ onBack }) {
   return (
     <div className="admin-dashboard">
       <div className="admin-header">
-        <h2>Analytics</h2>
+        <h2>Dashboard</h2>
         <div className="admin-header-actions">
-          <button className="btn btn-ghost btn-sm" onClick={() => { onBack ? onBack() : window.location.href = '/'; }}>
-            Back to App
-          </button>
-          <button className="btn btn-ghost btn-sm" onClick={() => fetchStats(sessionToken)} disabled={loading}>
-            {loading ? '...' : 'Refresh'}
-          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => { onBack ? onBack() : window.location.href = '/'; }}>Back</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => fetchStats(sessionToken)} disabled={loading}>{loading ? '...' : 'Refresh'}</button>
         </div>
       </div>
 
-      {/* Compact summary row */}
-      <div className="admin-summary-row">
-        {['24h', '7d', '30d'].map((period) => (
-          <div key={period} className="admin-summary-item">
-            <span className="admin-summary-period">{period}</span>
-            <span className="admin-summary-value">{periods[period].total_events}</span>
-            <span className="admin-summary-sub">events</span>
-            <span className="admin-summary-value">{periods[period].unique_sessions}</span>
-            <span className="admin-summary-sub">sessions</span>
-            {prev_periods && prev_periods[period] && (
-              <span className="admin-summary-trends">
-                {trendIndicator(periods[period].total_events, prev_periods[period].total_events, 'evt')}
-                {trendIndicator(periods[period].unique_sessions, prev_periods[period].unique_sessions, 'sess')}
-              </span>
-            )}
-          </div>
-        ))}
+      {error && <p className="admin-error" style={{ marginBottom: 12 }}>{error}</p>}
+
+      {/* KPI cards */}
+      <div className="admin-kpi-row">
+        <div className="admin-kpi-card">
+          <span className="admin-kpi-label">Users (7d)</span>
+          <span className="admin-kpi-value">{sessions7d}</span>
+          {prev_periods?.['7d'] && trend(sessions7d, prev_periods['7d'].unique_sessions)}
+        </div>
+        <div className="admin-kpi-card">
+          <span className="admin-kpi-label">Users (30d)</span>
+          <span className="admin-kpi-value">{sessions30d}</span>
+          {prev_periods?.['30d'] && trend(sessions30d, prev_periods['30d'].unique_sessions)}
+        </div>
+        <div className="admin-kpi-card">
+          <span className="admin-kpi-label">Conversion</span>
+          <span className="admin-kpi-value">{conversionRate}%</span>
+          <span className="admin-kpi-sub">upload to export</span>
+        </div>
+        <div className="admin-kpi-card">
+          <span className="admin-kpi-label">Device Split</span>
+          <span className="admin-kpi-value">{mobilePct}%</span>
+          <span className="admin-kpi-sub">mobile</span>
+        </div>
       </div>
 
-      {/* Funnel */}
+      {/* Funnel — visual step-down */}
       <div className="admin-panel">
         <h3>Funnel (30d)</h3>
-        <div className="admin-funnel">
-          {FUNNEL_ORDER.map((step, i) => {
-            const count = funnel[step] || 0;
+        <div className="admin-funnel-visual">
+          {FUNNEL_STEPS.map((step, i) => {
+            const count = funnel[step.key] || 0;
             const pct = funnelMax > 0 ? (count / funnelMax) * 100 : 0;
-            const prevStep = i > 0 ? (funnel[FUNNEL_ORDER[i - 1]] || 0) : 0;
-            const convPct = i > 0 && prevStep > 0 ? Math.round((count / prevStep) * 100) : null;
+            const prevCount = i > 0 ? (funnel[FUNNEL_STEPS[i - 1].key] || 0) : 0;
+            const dropoff = i > 0 && prevCount > 0 ? Math.round((count / prevCount) * 100) : null;
             return (
-              <div key={step} className="funnel-row">
-                <span className="funnel-label">{formatEvent(step)}</span>
-                <div className="funnel-bar-wrap">
-                  <div className="funnel-bar" style={{ '--funnel-bar-width': `${Math.max(pct, 2)}%` }} />
+              <div key={step.key} className="admin-funnel-step">
+                <div className="admin-funnel-bar-area">
+                  <div className="admin-funnel-bar" style={{ '--fw': `${Math.max(pct, 4)}%` }} />
                 </div>
-                <span className="funnel-count">
-                  {count}
-                  {convPct !== null && <span className="funnel-pct">{convPct}%</span>}
-                </span>
+                <div className="admin-funnel-meta">
+                  <span className="admin-funnel-label">{step.label}</span>
+                  <span className="admin-funnel-count">{count}</span>
+                  {dropoff !== null && (
+                    <span className="admin-funnel-drop">{dropoff}%</span>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Feature Usage */}
-      {features && (
-        <div className="admin-panel">
-          <h3>Feature Usage (30d)</h3>
-          <div className="admin-feature-row">
-            <span className="admin-feature-label">Device</span>
-            <div className="admin-feature-detail">
-              {(features.device.mobile + features.device.desktop) > 0 ? (
-                <>
-                  <div className="admin-dist-bar">
-                    <div className="admin-dist-seg admin-dist-mobile" style={{ '--seg-flex': features.device.mobile || 0 }} title={`Mobile: ${features.device.mobile}`} />
-                    <div className="admin-dist-seg admin-dist-desktop" style={{ '--seg-flex': features.device.desktop || 0 }} title={`Desktop: ${features.device.desktop}`} />
-                  </div>
-                  <span className="admin-dist-labels">
-                    <span>Mobile {features.device.mobile}</span>
-                    <span>Desktop {features.device.desktop}</span>
-                  </span>
-                </>
-              ) : '---'}
-            </div>
-          </div>
-          <div className="admin-feature-row">
-            <span className="admin-feature-label">Export</span>
-            <div className="admin-feature-detail">
-              {Object.keys(features.export_format).length > 0
-                ? Object.entries(features.export_format).map(([fmt, n]) => (
-                    <span key={fmt} className="admin-badge">{fmt.toUpperCase()} {n}</span>
-                  ))
-                : '---'}
-            </div>
-          </div>
-          <div className="admin-feature-row">
-            <span className="admin-feature-label">Action</span>
-            <div className="admin-feature-detail">
-              {Object.keys(features.export_action).length > 0
-                ? Object.entries(features.export_action).map(([action, n]) => (
-                    <span key={action} className="admin-badge">{action} {n}</span>
-                  ))
-                : '---'}
-            </div>
-          </div>
-          <div className="admin-feature-row">
-            <span className="admin-feature-label">Blur Mode</span>
-            <div className="admin-feature-detail">
-              {Object.keys(features.blur_mode).length > 0
-                ? Object.entries(features.blur_mode).map(([mode, n]) => (
-                    <span key={mode} className="admin-badge">{mode} {n}</span>
-                  ))
-                : '---'}
-            </div>
-          </div>
-          <div className="admin-feature-row">
-            <span className="admin-feature-label">ComfyUI</span>
-            <div className="admin-feature-detail">
-              {(features.comfyui.completed + features.comfyui.failed) > 0 ? (
-                <>
-                  <span
-                    className="admin-badge admin-badge-success"
-                    aria-label={`Succeeded ${features.comfyui.completed}`}
-                  >
-                    <span aria-hidden="true">✓ </span>OK {features.comfyui.completed}
-                  </span>
-                  <span
-                    className="admin-badge admin-badge-danger"
-                    aria-label={`Failed ${features.comfyui.failed}`}
-                  >
-                    <span aria-hidden="true">✗ </span>Fail {features.comfyui.failed}
-                  </span>
-                  <span className="admin-comfyui-rate">
-                    ({Math.round((features.comfyui.completed / (features.comfyui.completed + features.comfyui.failed)) * 100)}% success)
-                  </span>
-                  {Object.keys(features.comfyui.errors).length > 0 && (
-                    <div className="admin-error-list">
-                      {Object.entries(features.comfyui.errors)
-                        .sort((a, b) => b[1] - a[1])
-                        .slice(0, 3)
-                        .map(([msg, n]) => (
-                          <div key={msg} className="admin-error-item">{msg} <strong>x{n}</strong></div>
-                        ))}
-                    </div>
-                  )}
-                </>
-              ) : '---'}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Daily activity */}
       <div className="admin-panel">
         <div className="admin-panel-header">
-          <h3>Daily Activity (30d)</h3>
+          <h3>Activity (30d)</h3>
           <div className="admin-toggle">
-            <button className={`admin-toggle-btn${chartMode === 'events' ? ' active' : ''}`} onClick={() => setChartMode('events')} aria-pressed={chartMode === 'events'}>Events</button>
-            <button className={`admin-toggle-btn${chartMode === 'sessions' ? ' active' : ''}`} onClick={() => setChartMode('sessions')} aria-pressed={chartMode === 'sessions'}>Sessions</button>
+            <button className={`admin-toggle-btn${chartMode === 'sessions' ? ' active' : ''}`} onClick={() => setChartMode('sessions')}>Users</button>
+            <button className={`admin-toggle-btn${chartMode === 'events' ? ' active' : ''}`} onClick={() => setChartMode('events')}>Events</button>
           </div>
         </div>
         <div className="admin-chart">
@@ -331,13 +207,9 @@ export default function AdminDashboard({ onBack }) {
             const day = d.date.slice(8);
             const isFirst = i === 0 || d.date.slice(5, 7) !== daily[i - 1].date.slice(5, 7);
             const monthLabel = isFirst ? new Date(d.date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short' }) : null;
-            // Labeling every day puts 30 two-digit strings across a narrow
-            // panel, which crowds the layout. Anchor labels to the latest day
-            // and show every 5th one back, so the rightmost (most recent)
-            // column always has a label and the density stays readable.
             const showDayLabel = (daily.length - 1 - i) % 5 === 0;
             return (
-              <div key={d.date} className="chart-col" title={`${d.date}: ${d.events} events, ${d.sessions} sessions`}>
+              <div key={d.date} className="chart-col" title={`${d.date}: ${d.events} events, ${d.sessions} users`}>
                 <div className="chart-bar" style={{ '--bar-height': `${(val / maxDaily) * 100}%` }} />
                 <span className="chart-label">{showDayLabel ? day : ''}</span>
                 {monthLabel && <span className="chart-month">{monthLabel}</span>}
@@ -347,29 +219,104 @@ export default function AdminDashboard({ onBack }) {
         </div>
       </div>
 
-      {/* Event breakdown */}
+      {/* Tattoo removal health */}
+      {comfyTotal > 0 && (
+        <div className="admin-panel admin-comfy-panel">
+          <h3>Tattoo Removal</h3>
+          <div className="admin-comfy-row">
+            <div className="admin-comfy-ring">
+              <svg viewBox="0 0 36 36" className="admin-ring-svg">
+                <path className="admin-ring-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <path className="admin-ring-fg" strokeDasharray={`${comfyRate}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              </svg>
+              <span className="admin-ring-label">{comfyRate}%</span>
+            </div>
+            <div className="admin-comfy-stats">
+              <span className="admin-comfy-stat"><span className="dot dot-ok" /> {comfyOk} succeeded</span>
+              <span className="admin-comfy-stat"><span className="dot dot-fail" /> {comfyFail} failed</span>
+            </div>
+          </div>
+          {features.comfyui.errors && Object.keys(features.comfyui.errors).length > 0 && (
+            <div className="admin-comfy-errors">
+              {Object.entries(features.comfyui.errors).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([msg, n]) => (
+                <div key={msg} className="admin-error-item">{msg} <strong>x{n}</strong></div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+
+      {/* Detailed breakdown — collapsible */}
       <div className="admin-panel">
-        <h3>Events by Type</h3>
-        <div className="admin-event-list">
-          {Object.keys(periods['30d'].events || {})
-            .sort((a, b) => (periods['30d'].events[b] || 0) - (periods['30d'].events[a] || 0))
-            .map((evt) => (
-              <div key={evt} className="admin-event-row">
-                <span className="admin-event-name">{formatEvent(evt)}</span>
-                <div className="admin-event-counts">
-                  <span className="admin-event-count">{periods['24h'].events[evt] || 0}<small>24h</small></span>
-                  <span className="admin-event-count">{periods['7d'].events[evt] || 0}<small>7d</small></span>
-                  <span className="admin-event-count">{periods['30d'].events[evt] || 0}<small>30d</small></span>
+        <button className="admin-accordion-toggle" onClick={() => setDetailsOpen(v => !v)}>
+          <h3>Detailed Breakdown</h3>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            style={{ transform: detailsOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+        {detailsOpen && (
+          <>
+            {features && (
+              <div style={{ marginTop: 12 }}>
+                <div className="admin-feature-row">
+                  <span className="admin-feature-label">Export</span>
+                  <div className="admin-feature-detail">
+                    {Object.keys(features.export_format).length > 0
+                      ? Object.entries(features.export_format).map(([fmt, n]) => (
+                          <span key={fmt} className="admin-badge">{fmt.toUpperCase()} {n}</span>
+                        ))
+                      : '---'}
+                  </div>
+                </div>
+                <div className="admin-feature-row">
+                  <span className="admin-feature-label">Action</span>
+                  <div className="admin-feature-detail">
+                    {Object.keys(features.export_action).length > 0
+                      ? Object.entries(features.export_action).map(([action, n]) => (
+                          <span key={action} className="admin-badge">{action} {n}</span>
+                        ))
+                      : '---'}
+                  </div>
+                </div>
+                <div className="admin-feature-row">
+                  <span className="admin-feature-label">Blur Mode</span>
+                  <div className="admin-feature-detail">
+                    {Object.keys(features.blur_mode).length > 0
+                      ? Object.entries(features.blur_mode).map(([mode, n]) => (
+                          <span key={mode} className="admin-badge">{mode} {n}</span>
+                        ))
+                      : '---'}
+                  </div>
                 </div>
               </div>
-            ))}
-        </div>
+            )}
+            <div style={{ marginTop: 12 }}>
+              <h4 style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 8px', fontWeight: 600 }}>All Events (30d)</h4>
+              <div className="admin-event-list">
+                {Object.keys(periods['30d'].events || {})
+                  .sort((a, b) => (periods['30d'].events[b] || 0) - (periods['30d'].events[a] || 0))
+                  .map((evt) => (
+                    <div key={evt} className="admin-event-row">
+                      <span className="admin-event-name">{evt.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</span>
+                      <div className="admin-event-counts">
+                        <span className="admin-event-count">{periods['24h'].events[evt] || 0}<small>24h</small></span>
+                        <span className="admin-event-count">{periods['7d'].events[evt] || 0}<small>7d</small></span>
+                        <span className="admin-event-count">{periods['30d'].events[evt] || 0}<small>30d</small></span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* User Feedback — collapsible */}
+      {/* Feedback — collapsible */}
       <div className="admin-panel">
         <button className="admin-accordion-toggle" onClick={() => setFeedbackOpen(v => !v)}>
-          <h3>Beta Feedback ({feedback ? feedback.length : 0})</h3>
+          <h3>Feedback ({feedback ? feedback.length : 0})</h3>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
             style={{ transform: feedbackOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
             <polyline points="6 9 12 15 18 9" />
@@ -385,11 +332,7 @@ export default function AdminDashboard({ onBack }) {
                       <span className={`admin-feedback-cat cat-${fb.category}`}>
                         {{ bug: 'Bug', ux: 'UI/UX', feature: 'Feature', general: 'General' }[fb.category] || fb.category}
                       </span>
-                      {fb.severity && (
-                        <span className={`admin-feedback-sev sev-${fb.severity}`}>
-                          {fb.severity}
-                        </span>
-                      )}
+                      {fb.severity && <span className={`admin-feedback-sev sev-${fb.severity}`}>{fb.severity}</span>}
                     </div>
                     <div className="admin-feedback-actions">
                       <span className="admin-feedback-date">

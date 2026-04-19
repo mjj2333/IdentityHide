@@ -10,7 +10,16 @@ const BLACKBAR_HEIGHT_RANGE = 0.35;
 const BLACKBAR_EYE_Y_RATIO = 0.28;
 const BLACKBAR_X_EXTEND = 0.05;
 const BLACKBAR_WIDTH_EXTEND = 1.1;
-const FACE_BOX_EXPAND = 1.1;
+export const FACE_BOX_EXPAND = 1.1;
+
+export const BLUR_MODES = [
+  { key: 'gaussian', label: 'Gaussian' },
+  { key: 'pixelate', label: 'Pixelate' },
+  { key: 'blackbar', label: 'Black Bar' },
+];
+
+/** Lookup map from mode key → display label */
+export const BLUR_MODE_LABELS = Object.fromEntries(BLUR_MODES.map(m => [m.key, m.label]));
 const MASK_ALPHA_THRESHOLD = 128;
 
 const MUL_TABLE = [
@@ -268,7 +277,7 @@ export function blackBar(imageData) {
  * detections: optional array of face detections (used for blackbar eye positioning)
  * Returns a new canvas with the composited result.
  */
-export function applyMaskedBlur(sourceCanvas, maskCanvas, mode = 'gaussian', strength = 20, detections = null) {
+export function applyMaskedBlur(sourceCanvas, maskCanvas, mode = 'gaussian', strength = 20, detections = null, barSettings = null) {
   const { width, height } = sourceCanvas;
   const outCanvas = document.createElement('canvas');
   outCanvas.width = width;
@@ -303,18 +312,30 @@ export function applyMaskedBlur(sourceCanvas, maskCanvas, mode = 'gaussian', str
         const fw = det.bottomRight[0] - x;
         const fh = det.bottomRight[1] - y;
 
-        // Bar spans full face width, centered on eye region (~25-45% from top)
-        // Strength controls bar height: 5=thin, 60=covers most of face
-        const barHeightRatio = BLACKBAR_HEIGHT_MIN + (strength / 60) * BLACKBAR_HEIGHT_RANGE;
-        const barH = fh * barHeightRatio;
         const eyeY = y + fh * BLACKBAR_EYE_Y_RATIO;
-        const barY = eyeY - barH / 2;
+        const cx = x + fw / 2;
 
-        // Extend bar slightly past face edges for the classic look
-        const barX = x - fw * BLACKBAR_X_EXTEND;
-        const barW = fw * BLACKBAR_WIDTH_EXTEND;
+        let barH, barW, angle;
+        if (barSettings) {
+          barH = fh * (barSettings.width / 100);
+          barW = fw * (barSettings.length / 100);
+          angle = (barSettings.angle || 0) * Math.PI / 180;
+        } else {
+          const barHeightRatio = BLACKBAR_HEIGHT_MIN + (strength / 60) * BLACKBAR_HEIGHT_RANGE;
+          barH = fh * barHeightRatio;
+          barW = fw * BLACKBAR_WIDTH_EXTEND;
+          angle = 0;
+        }
 
-        combinedMaskCtx.fillRect(barX, barY, barW, barH);
+        if (angle !== 0) {
+          combinedMaskCtx.save();
+          combinedMaskCtx.translate(cx, eyeY);
+          combinedMaskCtx.rotate(angle);
+          combinedMaskCtx.fillRect(-barW / 2, -barH / 2, barW, barH);
+          combinedMaskCtx.restore();
+        } else {
+          combinedMaskCtx.fillRect(cx - barW / 2, eyeY - barH / 2, barW, barH);
+        }
       }
     }
 

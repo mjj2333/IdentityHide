@@ -21,6 +21,7 @@ export default function CoachMark({
   screenKey,
   onNext,
   onDismiss,
+  onDismissAll,
 }) {
   const bubbleRef = useRef(null);
   const btnRef = useRef(null);
@@ -124,10 +125,10 @@ export default function CoachMark({
     };
   }, [reposition]);
 
-  // Auto-focus the action button
-  useEffect(() => {
-    const t = setTimeout(() => btnRef.current?.focus(), 100);
-    return () => clearTimeout(t);
+  // Auto-focus the action button after positioning paint
+  useLayoutEffect(() => {
+    const raf = requestAnimationFrame(() => btnRef.current?.focus());
+    return () => cancelAnimationFrame(raf);
   }, [stepIndex]);
 
   // Escape key dismisses
@@ -221,6 +222,14 @@ export default function CoachMark({
             </button>
           </div>
         </div>
+        {onDismissAll && (
+          <button className="coach-mark-btn coach-mark-btn-off" onClick={() => {
+            track('walkthrough_turned_off', { screen: screenKey, step: stepIndex + 1 });
+            onDismissAll();
+          }}>
+            Turn off all tips
+          </button>
+        )}
       </div>
       {/* Hidden live region: deferred content push ensures SR observes mutation */}
       <div className="coach-mark-sr-announcer" role="status" aria-live="polite">

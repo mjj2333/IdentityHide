@@ -1,11 +1,11 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { usePipeline } from '../context/PipelineContext';
 import { extractMetadata } from '../utils/metadataExtractor';
-import { fileToCanvas, downscaleToMegapixels, upscaleCanvas } from '../utils/imageHelpers';
+import { fileToCanvas, downscaleToMegapixels } from '../utils/imageHelpers';
 import { uploadImage, uploadMask, queueAndWait, downloadOutputImage, prewarmFluxModels } from '../utils/comfyuiApi';
 import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from '../utils/comfyuiWorkflows';
 import { useFaceDetection } from './useFaceDetection';
-import { applyMaskedBlur } from '../utils/blurEngine';
+import { applyMaskedBlur, FACE_BOX_EXPAND } from '../utils/blurEngine';
 import { track } from '../utils/analytics';
 
 // Default working-resolution megapixel count. Callers (post-upload modal)
@@ -14,7 +14,6 @@ import { track } from '../utils/analytics';
 // so behaviour is identical when tierMP is omitted.
 const DEFAULT_WORKING_MP = 1;
 const MASK_ALPHA_THRESHOLD = 128;
-const FACE_BOX_EXPAND = 1.1;
 
 export function useImagePipeline() {
   const {
@@ -30,14 +29,19 @@ export function useImagePipeline() {
     tattooMaskCanvasRef,
     inpaintedCanvasRef,
     fullResCanvasRef,
-    workingScaleRef,
     setScreen,
   } = usePipeline();
 
   const { detect } = useFaceDetection();
 
+  // Incremented each time runPipeline starts — stale fire-and-forget
+  // callbacks (e.g. detect()) compare against this to no-op if the
+  // pipeline has been reset or re-entered since they were launched.
+  const pipelineGenRef = useRef(0);
+
   const runPipeline = useCallback(async (file, tierMP = DEFAULT_WORKING_MP) => {
     try {
+      const gen = ++pipelineGenRef.current;
       setStatus('stripping');
       setError(null);
 
@@ -56,8 +60,7 @@ export function useImagePipeline() {
       fullResCanvasRef.current = cleanCanvas;
 
       // Downscale to the user-selected working resolution (1/2/4/12 MP tier)
-      const { canvas: workCanvas, scale: wScale } = downscaleToMegapixels(cleanCanvas, tierMP);
-      workingScaleRef.current = wScale;
+      const { canvas: workCanvas } = downscaleToMegapixels(cleanCanvas, tierMP);
       strippedCanvasRef.current = workCanvas;
 
       // Full-res copy for before/after comparison
@@ -84,10 +87,14 @@ export function useImagePipeline() {
       setScreen('mask-edit');
       track('mask_editor_entered', { width: workCanvas.width, height: workCanvas.height });
 
-      // Fire-and-forget: detect faces while user paints mask
+      // Fire-and-forget: detect faces while user paints mask.
+      // Guarded by generation counter — if the pipeline is reset or re-entered
+      // before detection finishes, the stale callback no-ops.
       detect(workCanvas).then(faceDetections => {
+        if (pipelineGenRef.current !== gen) return;
         setDetections(faceDetections);
       }).catch(e => {
+        if (pipelineGenRef.current !== gen) return;
         console.warn('[Pipeline] Early face detection failed:', e.message);
         setWarning('Auto face detection failed — you can still paint face-blur regions manually.');
       });
@@ -103,15 +110,23 @@ export function useImagePipeline() {
     detect, setDetections,
     setMetadata, setStatus, setError, setWarning, setScreen,
     fullResCanvasRef, strippedCanvasRef, originalCanvasRef, outputCanvasRef,
-    tattooMaskCanvasRef, inpaintedCanvasRef, workingScaleRef,
+    tattooMaskCanvasRef, inpaintedCanvasRef,
   ]);
 
   /**
-   * Send 1MP image + mask to ComfyUI for Flux inpainting.
-   * Then optionally run client-side BlazeFace detection + blur.
-   * All processing at 1MP — upscale happens at export.
+   * Send the working-resolution image + tattoo mask to ComfyUI for Flux
+   * inpainting, then optionally run a client-side BlazeFace auto-detect+blur
+   * pass over the inpainted result.
+   *
+   * NOTE: `faceAutoBlur` only governs the automatic BlazeFace pass. The
+   * editor's manually-painted face regions (editDets, faceBlurCanvas) are
+   * NOT composited here — that happens downstream in ReviewScreen's
+   * applyFullBlur step. Callers that want a fully-blurred output must go
+   * through ReviewScreen (or replicate that step) regardless of this flag.
+   *
+   * All processing at the selected working resolution; upscale at export.
    */
-  const recompositeWithCustomMask = useCallback(async (customTattooMask, subjectName = 'default', { faceBlur = true, blurRadius = 30, blurMode = 'gaussian', onProgress = null, signal = null } = {}) => {
+  const recompositeWithCustomMask = useCallback(async (customTattooMask, { faceAutoBlur = true, blurRadius = 30, blurMode = 'gaussian', onProgress = null, signal = null } = {}) => {
     const src = strippedCanvasRef.current;
     if (!src) return;
 
@@ -134,8 +149,8 @@ export function useImagePipeline() {
       for (let i = 0; i < tmData.data.length; i += 4) {
         if (tmData.data[i + 3] > MASK_ALPHA_THRESHOLD) { hasMask = true; break; }
       }
-      if (!hasMask && !faceBlur) {
-        console.log('[PIPELINE] No mask pixels and no face blur — setting base only');
+      if (!hasMask && !faceAutoBlur) {
+        console.log('[PIPELINE] No mask pixels and no auto-face-blur — setting base only');
       }
     }
 
@@ -146,7 +161,7 @@ export function useImagePipeline() {
       if (hasMask) {
         checkAborted();
         if (onProgress) onProgress({ message: 'Uploading image...', fraction: 0.05 });
-        const imageName = await uploadImage(src, 'identityhide_input.png');
+        const imageName = await uploadImage(src, 'identityhide_input.png', { signal });
         checkAborted();
         console.log(`[PIPELINE] Uploaded image: ${imageName} (${src.width}x${src.height})`);
 
@@ -162,7 +177,7 @@ export function useImagePipeline() {
         }
 
         if (onProgress) onProgress({ message: 'Uploading mask...', fraction: 0.1 });
-        const maskName = await uploadMask(maskToUpload, 'identityhide_mask.png');
+        const maskName = await uploadMask(maskToUpload, 'identityhide_mask.png', { signal });
         console.log(`[PIPELINE] Uploaded mask: ${maskName}`);
         checkAborted();
 
@@ -208,14 +223,15 @@ export function useImagePipeline() {
       inpaintedCanvasRef.current = resultCanvas;
 
       // --- Step B: Client-side BlazeFace detection + blur (at 1MP) ---
-      console.log(`[PIPELINE] faceBlur=${faceBlur}, resultCanvas=${resultCanvas.width}x${resultCanvas.height}`);
-      if (faceBlur) {
+      console.log(`[PIPELINE] faceAutoBlur=${faceAutoBlur}, resultCanvas=${resultCanvas.width}x${resultCanvas.height}`);
+      if (faceAutoBlur) {
         checkAborted();
         if (onProgress) onProgress({ message: 'Detecting faces...', fraction: 0.8 });
         const faceDetections = await detect(resultCanvas);
         checkAborted();
         console.log(`[PIPELINE] Detected ${faceDetections.length} faces`);
         setDetections(faceDetections);
+        track('face_auto_detect', { count: faceDetections.length, width: resultCanvas.width, height: resultCanvas.height });
 
         if (faceDetections.length > 0) {
           if (onProgress) onProgress({ message: 'Blurring faces...', fraction: 0.9 });
@@ -241,14 +257,19 @@ export function useImagePipeline() {
         }
       }
 
+      // Free previous canvases before replacing to avoid memory leaks on re-entry
+      const prevOutput = outputCanvasRef.current;
+      if (prevOutput && prevOutput !== resultCanvas) { prevOutput.width = 0; prevOutput.height = 0; }
       outputCanvasRef.current = resultCanvas;
 
       // Update strippedCanvasRef for multi-pass workflow (use clean inpainted, not blurred)
+      const prevStripped = strippedCanvasRef.current;
       const clean = inpaintedCanvasRef.current;
       const copy = document.createElement('canvas');
       copy.width = clean.width;
       copy.height = clean.height;
       copy.getContext('2d').drawImage(clean, 0, 0);
+      if (prevStripped) { prevStripped.width = 0; prevStripped.height = 0; }
       strippedCanvasRef.current = copy;
 
       if (onProgress) onProgress({ message: 'Done!', fraction: 1.0 });
@@ -284,28 +305,21 @@ export function useImagePipeline() {
     }
 
     const blurred = applyMaskedBlur(base, faceMask, mode, strength, detections);
+    const prevOutput = outputCanvasRef.current;
+    if (prevOutput && prevOutput !== blurred && prevOutput !== base) { prevOutput.width = 0; prevOutput.height = 0; }
     outputCanvasRef.current = blurred;
   }, [inpaintedCanvasRef, outputCanvasRef]);
 
   /**
-   * Build full-resolution output for export.
-   * Upscales the 1MP processed result back to original dimensions.
+   * Build the export output at the tier-selected working resolution.
+   * The processed canvas is already at the user's chosen tier resolution
+   * (from downscaleToMegapixels in runPipeline), so we return it directly.
+   * This matches the "Output: WxH" promise shown in ResolutionTierModal —
+   * a user who picks "Quick" (1MP) gets a ~1MP file, not an upscaled fake.
    */
-  const buildFullResOutput = useCallback(async () => {
-    const processed = outputCanvasRef.current || inpaintedCanvasRef.current;
-    const original = fullResCanvasRef.current;
+  const buildExportOutput = useCallback(async () => {
+    return outputCanvasRef.current || inpaintedCanvasRef.current;
+  }, [inpaintedCanvasRef, outputCanvasRef]);
 
-    if (!processed || !original) return processed;
-
-    // If already at original resolution (scale was 1), return as-is
-    if (processed.width === original.width && processed.height === original.height) {
-      return processed;
-    }
-
-    // Upscale 1MP result to original dimensions
-    console.log(`[EXPORT] Upscaling ${processed.width}x${processed.height} → ${original.width}x${original.height}`);
-    return upscaleCanvas(processed, original.width, original.height);
-  }, [fullResCanvasRef, inpaintedCanvasRef, outputCanvasRef]);
-
-  return { runPipeline, recompositeWithCustomMask, reblurFaces, buildFullResOutput };
+  return { runPipeline, recompositeWithCustomMask, reblurFaces, buildExportOutput };
 }

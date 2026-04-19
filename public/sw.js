@@ -38,6 +38,13 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
+  // Ad networks: always bypass SW — must hit network fresh
+  if (url.hostname.includes('clickadilla') ||
+      url.hostname.includes('wpadmngr') ||
+      url.hostname.includes('admanager')) {
+    return; // let the browser handle it directly
+  }
+
   // Navigation: network-first, offline fallback
   if (request.mode === 'navigate') {
     event.respondWith(

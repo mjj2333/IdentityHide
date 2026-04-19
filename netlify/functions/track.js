@@ -16,6 +16,9 @@ const VALID_EVENTS = [
   'walkthrough_seen', 'walkthrough_completed', 'walkthrough_skipped',
   'pwa_update_available', 'pwa_update_applied', 'pwa_update_dismissed',
   'tier_selected', 'tier_modal_cancelled', 'tier_disabled_shown',
+  'batch_upload', 'batch_images_added', 'batch_process_start',
+  'batch_process_complete', 'batch_export_share', 'batch_export_individual',
+  'batch_export_zip',
 ];
 
 // Input limits. These are enforced with a 400 response (not silent

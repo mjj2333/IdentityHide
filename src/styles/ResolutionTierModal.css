@@ -161,6 +161,7 @@
   }
   .tier-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
   }
   .tier-card {
     min-height: 110px;
@@ -168,6 +169,27 @@
   }
   .tier-modal-title {
     font-size: 1rem;
+  }
+}
+
+/* Small phones (iPhone SE, etc.): tighter spacing */
+@media (max-width: 414px) {
+  .tier-backdrop {
+    padding: 10px;
+  }
+  .tier-grid {
+    gap: 8px;
+  }
+  .tier-card {
+    padding: 10px;
+    min-height: 100px;
+    gap: 4px;
+  }
+  .tier-card-label {
+    font-size: 0.88rem;
+  }
+  .tier-card-desc {
+    font-size: 0.75rem;
   }
 }
 

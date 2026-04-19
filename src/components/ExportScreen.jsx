@@ -4,7 +4,7 @@ import { useImagePipeline } from '../hooks/useImagePipeline';
 import { canvasToBlob, downloadBlob, generateExportFilename } from '../utils/imageHelpers';
 import { track } from '../utils/analytics';
 import { useZoomPan } from '../hooks/useZoomPan';
-import { useCoachMarks } from '../hooks/useCoachMarks';
+import { useCoachMarks, suppressAllWalkthroughs } from '../hooks/useCoachMarks';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import ScreenShell from './ScreenShell';
 import CoachMark from './CoachMark';
@@ -89,13 +89,11 @@ export default function ExportScreen({ onFeedback }) {
   const {
     outputCanvasRef,
     originalCanvasRef,
-    fullResCanvasRef,
-    workingScaleRef,
     setScreen,
     reset,
   } = usePipeline();
 
-  const { buildFullResOutput } = useImagePipeline();
+  const { buildExportOutput } = useImagePipeline();
 
   const previewRef = useRef(null);
   const canvasWrapRef = useRef(null);
@@ -126,29 +124,53 @@ export default function ExportScreen({ onFeedback }) {
 
   useEffect(() => {
     const canvas = previewRef.current;
-    const source = showOriginal ? originalCanvasRef.current : outputCanvasRef.current;
-    if (!canvas || !source) return;
-    canvas.width = source.width;
-    canvas.height = source.height;
-    canvas.getContext('2d').drawImage(source, 0, 0);
+    const output = outputCanvasRef.current;
+    const source = showOriginal ? originalCanvasRef.current : output;
+    if (!canvas || !source || !output) return;
+    // Always size the preview canvas to the output (tier) resolution so
+    // toggling between original and edited shows the tattoo/face changes
+    // without the canvas physically resizing.
+    canvas.width = output.width;
+    canvas.height = output.height;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    // Center-crop the source to the output's aspect ratio before scaling it
+    // into the preview canvas. The pipeline's 16-pixel alignment in
+    // downscaleToMegapixels causes the output aspect to drift ~0.5% from
+    // the source; without this crop, toggling to "original" stretches the
+    // image and the content shifts a pixel or two — visible as a subtle
+    // "size change" during compare. When showing the edited result, source
+    // === output so the crop math is a no-op.
+    const outAspect = output.width / output.height;
+    const srcAspect = source.width / source.height;
+    let sx = 0, sy = 0, sw = source.width, sh = source.height;
+    if (srcAspect > outAspect) {
+      sw = source.height * outAspect;
+      sx = (source.width - sw) / 2;
+    } else if (srcAspect < outAspect) {
+      sh = source.width / outAspect;
+      sy = (source.height - sh) / 2;
+    }
+    ctx.drawImage(source, sx, sy, sw, sh, 0, 0, output.width, output.height);
   }, [showOriginal, outputCanvasRef, originalCanvasRef]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const fullRes = await buildFullResOutput();
+      const fullRes = await buildExportOutput();
       if (cancelled || !fullRes) return;
       const mimeType = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
       const blob = await canvasToBlob(fullRes, mimeType, quality / 100);
       if (!cancelled) setFileSize(blob.size);
     })().catch(() => { if (!cancelled) setFileSize(null); });
     return () => { cancelled = true; };
-  }, [format, quality, buildFullResOutput]);
+  }, [format, quality, buildExportOutput]);
 
   const handleDownload = useCallback(async () => {
     setDownloading(true);
     setExportError(null);
-    // 60s ceiling — if buildFullResOutput or canvasToBlob ever stalls (e.g.
+    // 60s ceiling — if buildExportOutput or canvasToBlob ever stalls (e.g.
     // upstream ComfyUI hang on a touch-up, or a pathological huge encode),
     // surface a recoverable error rather than leaving the button stuck on
     // "Building...".
@@ -157,7 +179,7 @@ export default function ExportScreen({ onFeedback }) {
       timeoutId = setTimeout(() => reject(new Error('timeout')), 60_000);
     });
     try {
-      const fullResOutput = await Promise.race([buildFullResOutput(), timeout]);
+      const fullResOutput = await Promise.race([buildExportOutput(), timeout]);
       if (!fullResOutput) throw new Error('no-output');
       const ext = format === 'jpeg' ? 'jpg' : format;
       const mimeType = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
@@ -179,12 +201,12 @@ export default function ExportScreen({ onFeedback }) {
       clearTimeout(timeoutId);
       if (mountedRef.current) setDownloading(false);
     }
-  }, [format, quality, buildFullResOutput]);
+  }, [format, quality, buildExportOutput]);
 
   const handleShare = useCallback(async () => {
     if (!navigator.share || !navigator.canShare) return;
     try {
-      const fullResOutput = await buildFullResOutput();
+      const fullResOutput = await buildExportOutput();
       if (!fullResOutput) return;
       const mimeType = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
       const ext = format === 'jpeg' ? 'jpg' : format;
@@ -198,7 +220,7 @@ export default function ExportScreen({ onFeedback }) {
     } catch {
       // User cancelled share or share API failed
     }
-  }, [format, quality, buildFullResOutput]);
+  }, [format, quality, buildExportOutput]);
 
   const handleFeedbackDone = useCallback(() => {
     setShowFeedbackPrompt(false);
@@ -212,12 +234,12 @@ export default function ExportScreen({ onFeedback }) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const fullRes = fullResCanvasRef.current;
-  const dims = fullRes
-    ? `${fullRes.width}x${fullRes.height}`
-    : outputCanvasRef.current
-      ? `${outputCanvasRef.current.width}x${outputCanvasRef.current.height}`
-      : '';
+  // Export is at the working/tier resolution (see buildExportOutput), so the
+  // dims label should match outputCanvasRef — not fullResCanvasRef, which is
+  // the untouched source and no longer what gets written.
+  const dims = outputCanvasRef.current
+    ? `${outputCanvasRef.current.width}x${outputCanvasRef.current.height}`
+    : '';
 
   const toolbarContent = (
     <div className="bottom-toolbar-inner">
@@ -337,6 +359,7 @@ export default function ExportScreen({ onFeedback }) {
           screenKey="export"
           onNext={coachMarks.next}
           onDismiss={coachMarks.dismiss}
+          onDismissAll={() => { suppressAllWalkthroughs(); coachMarks.dismiss(); }}
         />
       )}
     </ScreenShell>

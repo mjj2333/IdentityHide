@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { rateLimit, checkOrigin } from './rateLimit.js';
-import { checkAdminAuth } from './auth.js';
+import { authenticateAdmin } from './auth.js';
 import { withSentry, captureException } from './_sentry.js';
 
 let supabase;
@@ -32,7 +32,15 @@ async function adminStatsHandler(event) {
   const og = checkOrigin(event);
   if (og.rejected) return og.response;
 
-  if (!checkAdminAuth(event)) {
+  const auth = await authenticateAdmin(event);
+  if (auth.locked) {
+    return {
+      statusCode: 429,
+      headers: { 'Retry-After': String(auth.retryAfter) },
+      body: 'Too many failed login attempts — try again later',
+    };
+  }
+  if (!auth.ok) {
     return { statusCode: 401, body: 'Unauthorized' };
   }
 
