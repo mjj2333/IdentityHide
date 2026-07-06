@@ -1,7 +1,7 @@
 import JSZip from 'jszip';
 import { fileToCanvas, downscaleToMegapixels, canvasToBlob, capToMaxDimension } from './imageHelpers';
 import { getMaxWorkingDimension } from './platform';
-import { applyMaskedBlur, stackBlur, FACE_BOX_EXPAND, migrateBlurSettings } from './blurEngine';
+import { applyMaskedBlur, stackBlur, migrateBlurSettings, drawRegionMask } from './blurEngine';
 import { extractMetadata } from './metadataExtractor';
 import {
   uploadImage,
@@ -117,14 +117,7 @@ export function buildFaceMask(detections, width, height, mode, feather = 0, face
   if (mode !== 'blackbar') {
     for (const det of detections) {
       if (det.kind === 'sticker') continue; // stickers aren't blur regions
-      ctx.fillStyle = 'white';
-      const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-      const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-      const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
-      const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-      ctx.fill();
+      drawRegionMask(ctx, det);
     }
   }
 

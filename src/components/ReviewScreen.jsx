@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { usePipeline } from '../context/PipelineContext';
-import { applyMaskedBlur, stackBlur, FACE_BOX_EXPAND } from '../utils/blurEngine';
+import { applyMaskedBlur, stackBlur, drawRegionMask } from '../utils/blurEngine';
 import { track } from '../utils/analytics';
 import { useZoomPan } from '../hooks/useZoomPan';
 import { useCoachMarks, suppressAllWalkthroughs } from '../hooks/useCoachMarks';
@@ -75,14 +75,7 @@ export default function ReviewScreen() {
     if (blurMode !== 'blackbar') {
       for (const det of dets) {
         if (det.kind === 'sticker') continue;
-        ctx.fillStyle = 'white';
-        const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-        const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-        const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
-        const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-        ctx.fill();
+        drawRegionMask(ctx, det);
       }
     }
 

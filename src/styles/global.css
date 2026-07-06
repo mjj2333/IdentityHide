@@ -2485,6 +2485,39 @@ input[type="range"].export-quality-slider::-moz-range-track {
   background: rgba(90, 200, 250, 0.12);
 }
 
+/* Rectangular blur region — square corners instead of the oval's 50%. */
+.face-overlay.rect-overlay {
+  border-radius: 6px;
+}
+
+/* Corner resize handles on the selected object. A small visible knob with a
+   larger invisible touch target (::after) so it's grabbable on mobile. Each
+   handle stops event propagation via its own pointer handler so dragging a
+   corner resizes instead of moving the box. */
+.face-overlay-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  box-sizing: border-box;
+  z-index: 3;
+  touch-action: none;
+}
+.face-overlay.sticker-overlay .face-overlay-handle {
+  border-color: #5ac8fa;
+}
+.face-overlay-handle::after {
+  content: '';
+  position: absolute;
+  inset: -13px; /* ~40px total hit area for touch */
+}
+.handle-nw { left: -8px; top: -8px; cursor: nwse-resize; }
+.handle-ne { right: -8px; top: -8px; cursor: nesw-resize; }
+.handle-sw { left: -8px; bottom: -8px; cursor: nesw-resize; }
+.handle-se { right: -8px; bottom: -8px; cursor: nwse-resize; }
+
 /* Disabled face overlay — user toggled this face off in the batch grid so
    the batch processor should skip it. Dimmed with a dashed grey border so
    the user can still see it's there and re-enable if needed. */
@@ -2512,6 +2545,15 @@ input[type="range"].export-quality-slider::-moz-range-track {
   background: var(--bg-elevated);
   border-radius: var(--radius-sm);
   padding: 6px 12px;
+}
+/* The resize slider was replaced by on-canvas handles; this hint fills the
+   space the slider used to hold so the Remove button stays right-aligned. */
+.oval-resize-hint {
+  flex: 1;
+  justify-content: center;
+}
+.oval-resize-hint .toolbar-hint {
+  opacity: 0.7;
 }
 
 .face-overlay-icon {

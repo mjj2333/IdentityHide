@@ -14,6 +14,29 @@ const BLACKBAR_X_EXTEND = 0.05;
 const BLACKBAR_WIDTH_EXTEND = 1.1;
 export const FACE_BOX_EXPAND = 1.1;
 
+/**
+ * Paint a single blur region into a mask context as solid white. Shape is
+ * driven by `det.shape`: 'rect' draws a filled rectangle, anything else
+ * (including undefined — auto-detected faces and legacy regions) draws an
+ * ellipse. Centralized here so the editor preview, review, export pipeline,
+ * and batch processor all render identical geometry. Callers are responsible
+ * for skipping sticker-kind objects before calling.
+ */
+export function drawRegionMask(ctx, det, expand = FACE_BOX_EXPAND) {
+  const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
+  const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
+  const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * expand;
+  const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * expand;
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  if (det.shape === 'rect') {
+    ctx.rect(cx - rx, cy - ry, rx * 2, ry * 2);
+  } else {
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
+
 export const BLUR_MODES = [
   { key: 'gaussian', label: 'Gaussian' },
   { key: 'pixelate', label: 'Pixelate' },

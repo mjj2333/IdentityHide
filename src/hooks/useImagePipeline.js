@@ -6,7 +6,7 @@ import { getMaxWorkingDimension } from '../utils/platform';
 import { uploadImage, uploadMask, queueAndWait, downloadOutputImage, prewarmFluxModels } from '../utils/comfyuiApi';
 import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from '../utils/comfyuiWorkflows';
 import { useFaceDetection } from './useFaceDetection';
-import { applyMaskedBlur, FACE_BOX_EXPAND } from '../utils/blurEngine';
+import { applyMaskedBlur, drawRegionMask } from '../utils/blurEngine';
 import { track } from '../utils/analytics';
 
 // Default working-resolution megapixel count. Callers (post-upload modal)
@@ -258,15 +258,7 @@ export function useImagePipeline() {
           const fmCtx = faceMask.getContext('2d');
 
           for (const det of faceDetections) {
-            const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-            const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-            const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
-            const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
-
-            fmCtx.fillStyle = 'white';
-            fmCtx.beginPath();
-            fmCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-            fmCtx.fill();
+            drawRegionMask(fmCtx, det);
           }
 
           // Auto-blur after inpaint: blur the detected-face mask, no stickers.
@@ -310,15 +302,7 @@ export function useImagePipeline() {
     const fmCtx = faceMask.getContext('2d');
 
     for (const det of detections) {
-      const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-      const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-      const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
-      const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
-
-      fmCtx.fillStyle = 'white';
-      fmCtx.beginPath();
-      fmCtx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-      fmCtx.fill();
+      drawRegionMask(fmCtx, det);
     }
 
     const blurred = applyMaskedBlur(base, faceMask, mode, strength, []);

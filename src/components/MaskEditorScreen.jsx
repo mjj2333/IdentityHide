@@ -6,7 +6,7 @@ import { useImagePipeline } from '../hooks/useImagePipeline';
 import { useZoomPan } from '../hooks/useZoomPan';
 import { useCoachMarks, suppressAllWalkthroughs } from '../hooks/useCoachMarks';
 import { testConnection } from '../utils/comfyuiApi';
-import { applyMaskedBlur, stackBlur, BLUR_MODE_LABELS, BAR_STYLES } from '../utils/blurEngine';
+import { applyMaskedBlur, stackBlur, BLUR_MODE_LABELS, BAR_STYLES, drawRegionMask } from '../utils/blurEngine';
 import ColorSpectrumPicker from './ColorSpectrumPicker';
 import { track } from '../utils/analytics';
 import ScreenShell from './ScreenShell';
@@ -287,14 +287,7 @@ export default function MaskEditorScreen() {
     if (mode !== 'blackbar') {
       for (const det of dets) {
         if (det.kind === 'sticker') continue; // stickers aren't blur regions
-        ctx.fillStyle = 'white';
-        const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-        const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-        const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * 1.1;
-        const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * 1.1;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-        ctx.fill();
+        drawRegionMask(ctx, det);
       }
     }
 
@@ -595,13 +588,16 @@ export default function MaskEditorScreen() {
 
   // --- Region / object management ---
   // Blur object: an oval that blurs whatever's under it.
-  const handleAddBlur = useCallback(() => {
-    const hw = imgW * 0.075;
-    const hh = hw * 1.3;
+  // Blur region: an oval or rectangle that blurs whatever's under it.
+  // `shape` is 'oval' | 'rect'; a rectangle starts a touch wider (bar-like).
+  const handleAddRegion = useCallback((shape) => {
+    const hw = imgW * (shape === 'rect' ? 0.11 : 0.075);
+    const hh = shape === 'rect' ? imgW * 0.05 : hw * 1.3;
     const cx = imgW / 2;
     const cy = imgH / 2;
     const newDet = {
       kind: 'blur',
+      shape,
       topLeft: [cx - hw, cy - hh],
       bottomRight: [cx + hw, cy + hh],
       origHw: hw,
@@ -614,7 +610,7 @@ export default function MaskEditorScreen() {
     };
     setEditDets(prev => [...prev, newDet]);
     setSelectedOvalIdx(editDetsRef.current.length);
-    track('blur_region_added');
+    track('blur_region_added', { shape });
   }, [imgW, imgH, setEditDets]);
 
   // Sticker object: a placed sticker (bar / SVG silhouette) with its own
@@ -667,25 +663,51 @@ export default function MaskEditorScreen() {
     forceRender();
   }, [faceBlurCanvasRef, forceRender, scheduleBlurPreview]);
 
-  const handleOvalResize = useCallback((newPercent) => {
-    if (selectedOvalIdx === null) return;
-    const det = editDetsRef.current[selectedOvalIdx];
-    if (!det || !det.origHw) return;
-    const scale = newPercent / 100;
-    const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-    const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-    const hw = det.origHw * scale;
-    const hh = det.origHh * scale;
-    const newDets = [...editDetsRef.current];
-    newDets[selectedOvalIdx] = {
-      ...newDets[selectedOvalIdx],
-      topLeft: [cx - hw, cy - hh],
-      bottomRight: [cx + hw, cy + hh],
+
+  // Corner-handle resize: free 2-D resize of the selected object's box.
+  // Each corner moves independently, opposite corner pinned, with a min size.
+  // origHw/origHh are re-synced to the new half-dimensions so the uniform
+  // "Resize" slider scales from the current (possibly stretched) shape.
+  const handleResizeDown = useCallback((e, index, corner) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedOvalIdx(index);
+    const dets = editDetsRef.current;
+    const origTL = [...dets[index].topLeft];
+    const origBR = [...dets[index].bottomRight];
+    const MIN = Math.max(8, imgW * 0.02); // min box side in image px
+
+    const onMove = (ev) => {
+      ev.preventDefault();
+      const p = screenToImage(ev.clientX, ev.clientY, displayRef.current);
+      let [l, t] = origTL;
+      let [r, b] = origBR;
+      if (corner.includes('w')) l = Math.min(p.x, r - MIN);
+      if (corner.includes('e')) r = Math.max(p.x, l + MIN);
+      if (corner.includes('n')) t = Math.min(p.y, b - MIN);
+      if (corner.includes('s')) b = Math.max(p.y, t + MIN);
+      setEditDets(prev => {
+        const next = [...prev];
+        next[index] = {
+          ...next[index],
+          topLeft: [l, t],
+          bottomRight: [r, b],
+          origHw: (r - l) / 2,
+          origHh: (b - t) / 2,
+        };
+        return next;
+      });
+      forceRender();
     };
-    setEditDets(newDets);
-    editDetsRef.current = newDets;
-    forceRender();
-  }, [selectedOvalIdx, setEditDets, forceRender]);
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    const onUp = () => cleanup();
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    globalListenersRef.current.push(cleanup);
+  }, [screenToImage, setEditDets, forceRender, imgW]);
 
   const handleFaceDragDown = useCallback((e, index) => {
     e.preventDefault();
@@ -929,9 +951,6 @@ export default function MaskEditorScreen() {
     />
   ) : null;
 
-  const selectedOvalScale = selectedOvalIdx !== null && editDets[selectedOvalIdx]?.origHw
-    ? Math.round(((editDets[selectedOvalIdx].bottomRight[0] - editDets[selectedOvalIdx].topLeft[0]) / 2) / editDets[selectedOvalIdx].origHw * 100)
-    : 100;
 
   // Smart primary action: skip ComfyUI when mask unchanged or when it's down
   const handlePrimaryAction = useCallback(() => {
@@ -1149,32 +1168,10 @@ export default function MaskEditorScreen() {
           </>
         )}
       </div>
+      {/* Size is now set by dragging the on-canvas corner handles; only
+          rotation (which handles can't express) keeps a slider. */}
       {selectedSticker && (
         <div className="toolbar-row">
-          <div className="toolbar-group toolbar-group-slider">
-            <label className="toolbar-slider">
-              <span>Width</span>
-              <input
-                type="range"
-                min="10"
-                max="100"
-                value={selectedSticker.barWidth ?? 100}
-                onChange={(e) => updateSelectedSticker({ barWidth: parseInt(e.target.value, 10) })}
-              />
-            </label>
-          </div>
-          <div className="toolbar-group toolbar-group-slider">
-            <label className="toolbar-slider">
-              <span>Length</span>
-              <input
-                type="range"
-                min="10"
-                max="100"
-                value={selectedSticker.barLength ?? 100}
-                onChange={(e) => updateSelectedSticker({ barLength: parseInt(e.target.value, 10) })}
-              />
-            </label>
-          </div>
           <div className="toolbar-group toolbar-group-slider">
             <label className="toolbar-slider">
               <span>Angle</span>
@@ -1196,20 +1193,15 @@ export default function MaskEditorScreen() {
     <div className="toolbar-row oval-resize-row">
       <div className="toolbar-group toolbar-group-inline">
         <span className="toolbar-label">
-          {selectedSticker ? 'Sticker' : (blurSubMode === 'autoface' ? 'Face' : 'Blur')} {selectedOvalIdx + 1}
+          {selectedSticker
+            ? 'Sticker'
+            : blurSubMode === 'autoface'
+              ? 'Face'
+              : (editDets[selectedOvalIdx]?.shape === 'rect' ? 'Rectangle' : 'Oval')} {selectedOvalIdx + 1}
         </span>
       </div>
-      <div className="toolbar-group toolbar-group-slider">
-        <label className="toolbar-slider">
-          <span>Resize</span>
-          <input
-            type="range"
-            min="30"
-            max="300"
-            value={selectedOvalScale}
-            onChange={(e) => { handleOvalResize(parseInt(e.target.value, 10));}}
-          />
-        </label>
+      <div className="toolbar-group toolbar-group-inline oval-resize-hint">
+        <span className="toolbar-hint">Drag the corner handles to resize</span>
       </div>
       <div className="toolbar-group toolbar-group-inline">
         <button
@@ -1302,16 +1294,19 @@ export default function MaskEditorScreen() {
       {/* Blur category */}
         {category === 'blur' && blurSubMode === 'shape' && (
           <div className="toolbar-panel mask-editor-toolbar-panel">
-            <h3 className="mode-panel-title">Shape Blur</h3>
+            <h3 className="mode-panel-title">Manual Blur</h3>
             {blurAdjustmentsRow}
             {selectedBlurRegionRow}
             <div className="toolbar-row">
               <div className="toolbar-group toolbar-group-buttons">
-                <button className="tool-btn" onClick={handleAddBlur} title="Add a blur region">
-                  + Add Blur
+                <button className="tool-btn" onClick={() => handleAddRegion('oval')} title="Add an oval blur region">
+                  + Oval
+                </button>
+                <button className="tool-btn" onClick={() => handleAddRegion('rect')} title="Add a rectangular blur region">
+                  + Rectangle
                 </button>
                 <button className="tool-btn" onClick={handleAddSticker} title="Add a sticker">
-                  + Add Sticker
+                  + Sticker
                 </button>
               </div>
             </div>
@@ -1332,7 +1327,7 @@ export default function MaskEditorScreen() {
                   Detect Faces
                 </button>
                 <button className="tool-btn" onClick={handleAddSticker} title="Add a sticker">
-                  + Add Sticker
+                  + Sticker
                 </button>
                 <button className="tool-btn" onClick={handleClearFaces} title="Clear all blur regions">
                   Clear All
@@ -1441,7 +1436,7 @@ export default function MaskEditorScreen() {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             </svg>
-            {{ autoface: 'Auto Blur', shape: 'Shape Blur', freehand: 'Freehand Blur' }[blurSubMode]}
+            {{ autoface: 'Auto Blur', shape: 'Manual Blur', freehand: 'Freehand Blur' }[blurSubMode]}
             <svg className={`blur-tab-chevron${category === 'blur' ? ' active' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points={blurPickerOpen ? '6 15 12 9 18 15' : '6 9 12 15 18 9'} />
             </svg>
@@ -1454,7 +1449,7 @@ export default function MaskEditorScreen() {
                     <path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                   </svg>
                 )},
-                { value: 'shape', label: 'Shape Blur', icon: (
+                { value: 'shape', label: 'Manual Blur', icon: (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="12" rx="9" ry="6"/></svg>
                 )},
                 { value: 'freehand', label: 'Freehand Blur', icon: (
@@ -1537,7 +1532,7 @@ export default function MaskEditorScreen() {
             {editDets.map((det, i) => (
               <div
                 key={`face-${i}`}
-                className={`face-overlay${selectedOvalIdx === i ? ' selected' : ''}${det.kind === 'sticker' ? ' sticker-overlay' : ''}`}
+                className={`face-overlay${selectedOvalIdx === i ? ' selected' : ''}${det.kind === 'sticker' ? ' sticker-overlay' : ''}${det.kind !== 'sticker' && det.shape === 'rect' ? ' rect-overlay' : ''}`}
                 style={{
                   position: 'absolute',
                   left: `${(det.topLeft[0] / imgW) * 100}%`,
@@ -1570,6 +1565,13 @@ export default function MaskEditorScreen() {
                     </svg>
                   </button>
                 )}
+                {category === 'blur' && selectedOvalIdx === i && ['nw', 'ne', 'sw', 'se'].map((corner) => (
+                  <div
+                    key={corner}
+                    className={`face-overlay-handle handle-${corner}`}
+                    onPointerDown={(e) => handleResizeDown(e, i, corner)}
+                  />
+                ))}
               </div>
             ))}
           </div>

@@ -2,7 +2,7 @@ import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useBatch } from '../context/BatchContext';
 import { useZoomPan } from '../hooks/useZoomPan';
-import { applyMaskedBlur, stackBlur, BLUR_MODE_LABELS, FACE_BOX_EXPAND, BAR_STYLES, migrateBlurSettings } from '../utils/blurEngine';
+import { applyMaskedBlur, stackBlur, BLUR_MODE_LABELS, BAR_STYLES, migrateBlurSettings, drawRegionMask } from '../utils/blurEngine';
 import ColorSpectrumPicker from './ColorSpectrumPicker';
 import { buildFaceMask, createThumbnail, canvasToBlobUrl } from '../utils/batchProcessor';
 import ScreenShell from './ScreenShell';
@@ -232,14 +232,7 @@ export default function BatchEditorScreen({ onBack }) {
     if (mode !== 'blackbar') {
       for (const det of dets) {
         if (det.kind === 'sticker') continue; // stickers aren't blur regions
-        ctx.fillStyle = 'white';
-        const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-        const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-        const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
-        const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-        ctx.fill();
+        drawRegionMask(ctx, det);
       }
     }
 
@@ -432,26 +425,50 @@ export default function BatchEditorScreen({ onBack }) {
     globalListenersRef.current.push(cleanup);
   }, [screenToImage, forceRender]);
 
-  // --- Resize via slider ---
-  const handleOvalResize = useCallback((newPercent) => {
-    if (selectedIdx === null) return;
-    const det = editDetsRef.current[selectedIdx];
-    if (!det || !det.origHw) return;
-    const scale = newPercent / 100;
-    const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-    const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-    const hw = det.origHw * scale;
-    const hh = det.origHh * scale;
-    const newDets = [...editDetsRef.current];
-    newDets[selectedIdx] = {
-      ...newDets[selectedIdx],
-      topLeft: [cx - hw, cy - hh],
-      bottomRight: [cx + hw, cy + hh],
+  // --- Corner-handle resize (free 2-D) ---
+  // Each corner moves independently, opposite corner pinned, min-size clamp.
+  // origHw/origHh re-synced so nothing downstream relies on a stale base.
+  const handleResizeDown = useCallback((e, index, corner) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedIdx(index);
+    const dets = editDetsRef.current;
+    const origTL = [...dets[index].topLeft];
+    const origBR = [...dets[index].bottomRight];
+    const MIN = Math.max(8, imgW * 0.02);
+
+    const onMove = (ev) => {
+      ev.preventDefault();
+      const p = screenToImage(ev.clientX, ev.clientY, canvasRef.current);
+      let [l, t] = origTL;
+      let [r, b] = origBR;
+      if (corner.includes('w')) l = Math.min(p.x, r - MIN);
+      if (corner.includes('e')) r = Math.max(p.x, l + MIN);
+      if (corner.includes('n')) t = Math.min(p.y, b - MIN);
+      if (corner.includes('s')) b = Math.max(p.y, t + MIN);
+      setEditDets(prev => {
+        const next = [...prev];
+        next[index] = {
+          ...next[index],
+          topLeft: [l, t],
+          bottomRight: [r, b],
+          origHw: (r - l) / 2,
+          origHh: (b - t) / 2,
+        };
+        return next;
+      });
+      forceRender();
     };
-    setEditDets(newDets);
-    editDetsRef.current = newDets;
-    forceRender();
-  }, [selectedIdx, forceRender]);
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      globalListenersRef.current = globalListenersRef.current.filter(fn => fn !== cleanup);
+    };
+    const onUp = () => cleanup();
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    globalListenersRef.current.push(cleanup);
+  }, [screenToImage, forceRender, imgW]);
 
   // Remove a detection
   const handleRemoveFace = useCallback((idx) => {
@@ -459,14 +476,15 @@ export default function BatchEditorScreen({ onBack }) {
     setSelectedIdx(null);
   }, []);
 
-  // Add a blur object (oval)
-  const handleAddBlur = useCallback(() => {
-    const hw = imgW * 0.075;
-    const hh = hw * 1.3;
+  // Add a blur region — oval or rectangle (rect starts a touch wider/bar-like).
+  const handleAddRegion = useCallback((shape) => {
+    const hw = imgW * (shape === 'rect' ? 0.11 : 0.075);
+    const hh = shape === 'rect' ? imgW * 0.05 : hw * 1.3;
     const cx = imgW / 2;
     const cy = imgH / 2;
     setEditDets(prev => [...prev, {
       kind: 'blur',
+      shape,
       topLeft: [cx - hw, cy - hh],
       bottomRight: [cx + hw, cy + hh],
       origHw: hw,
@@ -699,10 +717,6 @@ export default function BatchEditorScreen({ onBack }) {
     );
   }
 
-  const selectedOvalScale = selectedIdx !== null && editDets[selectedIdx]?.origHw
-    ? Math.round(((editDets[selectedIdx].bottomRight[0] - editDets[selectedIdx].topLeft[0]) / 2) / editDets[selectedIdx].origHw * 100)
-    : 100;
-
   // Blur type + current-sticker selector. Gaussian / Pixelate pick the blur
   // TYPE (always one active in Auto/Shape). The Stickers dropdown picks the
   // style/color of the SELECTED sticker, or the default for the next Add
@@ -870,22 +884,10 @@ export default function BatchEditorScreen({ onBack }) {
           </>
         )}
       </div>
+      {/* Size is set by dragging the on-canvas corner handles; only rotation
+          (which handles can't express) keeps a slider. */}
       {selectedSticker && (
         <div className="toolbar-row">
-          <div className="toolbar-group toolbar-group-slider">
-            <label className="toolbar-slider">
-              <span>Width</span>
-              <input type="range" min="10" max="100" value={selectedSticker.barWidth ?? 100}
-                onChange={(e) => updateSelectedSticker({ barWidth: parseInt(e.target.value, 10) })} />
-            </label>
-          </div>
-          <div className="toolbar-group toolbar-group-slider">
-            <label className="toolbar-slider">
-              <span>Length</span>
-              <input type="range" min="10" max="100" value={selectedSticker.barLength ?? 100}
-                onChange={(e) => updateSelectedSticker({ barLength: parseInt(e.target.value, 10) })} />
-            </label>
-          </div>
           <div className="toolbar-group toolbar-group-slider">
             <label className="toolbar-slider">
               <span>Angle</span>
@@ -902,15 +904,15 @@ export default function BatchEditorScreen({ onBack }) {
     <div className="toolbar-row oval-resize-row">
       <div className="toolbar-group toolbar-group-inline">
         <span className="toolbar-label">
-          {selectedSticker ? 'Sticker' : (blurSubMode === 'autoface' ? 'Face' : 'Blur')} {selectedIdx + 1}
+          {selectedSticker
+            ? 'Sticker'
+            : blurSubMode === 'autoface'
+              ? 'Face'
+              : (editDets[selectedIdx]?.shape === 'rect' ? 'Rectangle' : 'Oval')} {selectedIdx + 1}
         </span>
       </div>
-      <div className="toolbar-group toolbar-group-slider">
-        <label className="toolbar-slider">
-          <span>Resize</span>
-          <input type="range" min="30" max="300" value={selectedOvalScale}
-            onChange={(e) => { handleOvalResize(parseInt(e.target.value, 10));}} />
-        </label>
+      <div className="toolbar-group toolbar-group-inline oval-resize-hint">
+        <span className="toolbar-hint">Drag the corner handles to resize</span>
       </div>
       <div className="toolbar-group toolbar-group-inline">
         <button className="tool-btn" onClick={() => handleRemoveFace(selectedIdx)}
@@ -966,16 +968,19 @@ export default function BatchEditorScreen({ onBack }) {
 
         {topMode === 'blur' && blurSubMode === 'shape' && (
           <div className="toolbar-panel mask-editor-toolbar-panel">
-            <h3 className="mode-panel-title">Shape Blur</h3>
+            <h3 className="mode-panel-title">Manual Blur</h3>
             {blurAdjustmentsRow}
             {selectedBlurRegionRow}
             <div className="toolbar-row">
               <div className="toolbar-group toolbar-group-buttons">
-                <button className="tool-btn" onClick={handleAddBlur} title="Add a blur region">
-                  + Add Blur
+                <button className="tool-btn" onClick={() => handleAddRegion('oval')} title="Add an oval blur region">
+                  + Oval
+                </button>
+                <button className="tool-btn" onClick={() => handleAddRegion('rect')} title="Add a rectangular blur region">
+                  + Rectangle
                 </button>
                 <button className="tool-btn" onClick={handleAddSticker} title="Add a sticker">
-                  + Add Sticker
+                  + Sticker
                 </button>
               </div>
             </div>
@@ -990,7 +995,7 @@ export default function BatchEditorScreen({ onBack }) {
             <div className="toolbar-row">
               <div className="toolbar-group toolbar-group-buttons">
                 <button className="tool-btn" onClick={handleAddSticker} title="Add a sticker">
-                  + Add Sticker
+                  + Sticker
                 </button>
                 <button className="tool-btn" onClick={handleClearFaces} title="Clear all blur regions">
                   Clear All
@@ -1076,7 +1081,7 @@ export default function BatchEditorScreen({ onBack }) {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             </svg>
-            {{ autoface: 'Auto Blur', shape: 'Shape Blur', freehand: 'Freehand Blur' }[blurSubMode]}
+            {{ autoface: 'Auto Blur', shape: 'Manual Blur', freehand: 'Freehand Blur' }[blurSubMode]}
             <svg className={`blur-tab-chevron${topMode === 'blur' ? ' active' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
               <polyline points={blurPickerOpen ? '6 15 12 9 18 15' : '6 9 12 15 18 9'} />
             </svg>
@@ -1089,7 +1094,7 @@ export default function BatchEditorScreen({ onBack }) {
                     <path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                   </svg>
                 )},
-                { value: 'shape', label: 'Shape Blur', icon: (
+                { value: 'shape', label: 'Manual Blur', icon: (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="12" rx="9" ry="6"/></svg>
                 )},
                 { value: 'freehand', label: 'Freehand Blur', icon: (
@@ -1157,7 +1162,7 @@ export default function BatchEditorScreen({ onBack }) {
             {topMode === 'blur' && editDets.map((det, i) => (
               <div
                 key={`face-${i}`}
-                className={`face-overlay${selectedIdx === i ? ' selected' : ''}${det.kind === 'sticker' ? ' sticker-overlay' : ''}${!det.enabled ? ' face-overlay-disabled' : ''}`}
+                className={`face-overlay${selectedIdx === i ? ' selected' : ''}${det.kind === 'sticker' ? ' sticker-overlay' : ''}${det.kind !== 'sticker' && det.shape === 'rect' ? ' rect-overlay' : ''}${!det.enabled ? ' face-overlay-disabled' : ''}`}
                 style={{
                   position: 'absolute',
                   left: `${(det.topLeft[0] / imgW) * 100}%`,
@@ -1186,6 +1191,13 @@ export default function BatchEditorScreen({ onBack }) {
                     <line x1="20" y1="4" x2="4" y2="20" />
                   </svg>
                 </button>
+                {blurSubMode !== 'freehand' && selectedIdx === i && ['nw', 'ne', 'sw', 'se'].map((corner) => (
+                  <div
+                    key={corner}
+                    className={`face-overlay-handle handle-${corner}`}
+                    onPointerDown={(e) => handleResizeDown(e, i, corner)}
+                  />
+                ))}
               </div>
             ))}
           </div>
