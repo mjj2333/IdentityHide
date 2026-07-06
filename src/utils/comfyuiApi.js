@@ -1,5 +1,5 @@
 /**
- * ComfyUI API client for IdentityHide.
+ * ComfyUI API client for Redact.ID.
  * Handles image upload, prompt queueing, WebSocket progress, and result download.
  */
 

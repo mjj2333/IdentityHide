@@ -36,6 +36,18 @@
   to = "/index.html"
   status = 200
 
+[[redirects]]
+  from = "/account"
+  to = "/index.html"
+  status = 200
+
+# Post-Stripe-Checkout landing. EntitlementContext reads ?session_id= and
+# swaps the URL back to / after confirming the subscription.
+[[redirects]]
+  from = "/success"
+  to = "/index.html"
+  status = 200
+
 # Security headers for all pages
 [[headers]]
   for = "/*"
@@ -72,7 +84,7 @@
     # - Adsterra popunder script loads from profitablecpmratenetwork.com;
     #   opened popunders are cross-origin window.open (not iframed), so no
     #   frame-src entry is needed — script-src + connect-src cover it.
-    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.applixir.com https://*.applixir.com https://*.profitablecpmratenetwork.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://identity-hide.com wss://identity-hide.com https://cdn.applixir.com https://*.applixir.com https://*.profitablecpmratenetwork.com https://o4511186341658625.ingest.us.sentry.io https://tfhub.dev https://storage.googleapis.com https://www.kaggle.com https://kaggle.com; font-src 'self' data:; frame-src https://*.applixir.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.applixir.com https://*.applixir.com https://*.profitablecpmratenetwork.com https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://identity-hide.com wss://identity-hide.com https://cdn.applixir.com https://*.applixir.com https://*.profitablecpmratenetwork.com https://o4511186341658625.ingest.us.sentry.io https://tfhub.dev https://storage.googleapis.com https://www.kaggle.com https://kaggle.com https://api.stripe.com https://checkout.stripe.com https://m.stripe.network; font-src 'self' data:; frame-src https://*.applixir.com https://checkout.stripe.com https://js.stripe.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'"
 
 # Cache ONNX models for 1 year — they're versioned by filename
 [[headers]]
@@ -91,3 +103,41 @@
   for = "/assets/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+# CORS for native shells. The Android (https://localhost) and iOS
+# (capacitor://localhost) Capacitor WebViews make cross-origin requests
+# against the deployed functions. Without these headers the browser blocks
+# the response and the call fails with "Unexpected token '<'" (the SPA
+# fallback HTML coming back as a fake function body).
+#
+# Allow-Origin "*" is safe here because: (a) we don't use cookies for auth
+# (admin uses Authorization: Bearer; entitlement is plain GET), (b)
+# checkOrigin in rateLimit.js still rejects unrecognized callers at the
+# function level, and (c) all sensitive endpoints layer on rate-limit +
+# password lockout. CORS is not the auth boundary.
+[[headers]]
+  for = "/.netlify/functions/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    Access-Control-Max-Age = "86400"
+
+# Apple App Site Association — Universal Links handshake. Apple fetches this
+# file when the iOS app installs to verify the domain. It must be served as
+# application/json with NO redirects in the request path. The file itself
+# lives at public/.well-known/apple-app-site-association (no extension).
+[[headers]]
+  for = "/.well-known/apple-app-site-association"
+  [headers.values]
+    Content-Type = "application/json"
+    Cache-Control = "public, max-age=3600"
+
+# Android App Links — equivalent of Apple's AASA. Google's Digital Asset
+# Links verifier fetches this when the Android app installs (and Play Store
+# verifies it server-side at upload time). Must be application/json.
+[[headers]]
+  for = "/.well-known/assetlinks.json"
+  [headers.values]
+    Content-Type = "application/json"
+    Cache-Control = "public, max-age=3600"

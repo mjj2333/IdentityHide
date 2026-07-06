@@ -32,8 +32,10 @@ function getSessionId() {
   return id;
 }
 
+import { apiUrl } from './api';
+
 function sendWithRetry(payload, attempt = 0) {
-  fetch('/.netlify/functions/track', {
+  fetch(apiUrl('/.netlify/functions/track'), {
     method: 'POST',
     body: payload,
     headers: { 'Content-Type': 'application/json' },

@@ -1,45 +1,22 @@
-/* ── Batch Grid Screen ── */
-.batch-screen {
-  display: flex;
-  flex-direction: column;
-  min-height: var(--app-height);
-  padding: 0;
+/* Batch screens use the shared ScreenShell, so .batch-screen, .batch-header,
+   .batch-title, and .batch-count rules are deliberately absent here — the
+   top-bar styling lives in global.css (.screen-top-bar / .top-bar-brand /
+   Wordmark). This keeps single-image and batch flows visually unified. */
+
+/* Photo count now lives in the ScreenShell top-bar right slot via the
+   `topRight` prop (see .top-bar-count in global.css). */
+
+/* Hidden file input — triggered programmatically by the "Add More" button.
+   Without this rule the browser renders its native "Choose Files" UI between
+   the grid and the bottom controls. */
+.dropzone-input {
+  display: none;
 }
 
-.batch-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-surface);
-}
-
-.batch-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text);
-  margin: 0;
-  flex: 1;
-  text-align: center;
-}
-
-.batch-count {
-  font-size: 13px;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
-/* ── Bottom panel (controls + action button) ── */
-.batch-bottom {
-  border-top: 1px solid var(--border);
-  background: var(--bg-surface);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  padding-bottom: var(--safe-area-bottom);
-}
+/* .batch-bottom rule removed — ScreenShell's .screen-bottom-toolbar now
+   provides the border-top, background, and safe-area-bottom handling that
+   .batch-bottom used to. The toolbar prop carries .batch-controls and
+   .batch-actions directly. */
 
 /* ── Global Controls ── */
 .batch-controls {
@@ -106,15 +83,6 @@
   text-align: right;
 }
 
-/* ── Hint text ── */
-.batch-hint {
-  margin: 0;
-  padding: 6px 20px;
-  font-size: 12px;
-  color: var(--text-dim);
-  text-align: center;
-}
-
 /* Metadata summary — parity with ReviewScreen's stripped-metadata
    block, but condensed because per-image tables don't scale to 20 photos. */
 .batch-metadata-summary {
@@ -139,16 +107,19 @@
 
 .batch-card {
   position: relative;
-  aspect-ratio: 1;
+  /* padding-bottom:100% + height:0 enforces a 1:1 square AND contributes
+     the correct intrinsic height to the parent grid's auto-row sizing.
+     `aspect-ratio:1` alone doesn't — the grid computes row heights before
+     column widths resolve, so aspect-ratio sees 0 width and sizes rows
+     to 0, causing cards to balloon and overlap each other vertically. */
+  height: 0;
+  padding-bottom: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-surface);
   overflow: hidden;
   cursor: pointer;
   transition: all var(--dur-fast);
-  display: flex;
-  flex-direction: column;
-  padding: 0;
   font: inherit;
   color: inherit;
   text-align: center;
@@ -255,7 +226,13 @@
   }
 }
 
+/* Absolute-positioned so the image's intrinsic pixel height can't expand
+   the card past its aspect-ratio:1 box — without this, a tall source image
+   was letting flex basis override the square aspect ratio, causing cards
+   to grow taller than one grid row and visually overlap the next row. */
 .batch-card-thumb {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -263,7 +240,8 @@
 }
 
 .batch-card-placeholder {
-  flex: 1;
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -294,13 +272,21 @@
 
 .batch-card-add {
   border-style: dashed;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* The card uses padding-bottom:100% for grid-safe square sizing, which
+   leaves the content area 0-high. This inner wrapper fills the padded box
+   with absolute positioning and lays out the + icon and label vertically. */
+.batch-card-add-inner {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  color: var(--text-dim);
-  font-size: 13px;
 }
 
 .batch-card-add:hover {
@@ -442,10 +428,6 @@
 
   .batch-card-remove {
     opacity: 1;
-  }
-
-  .batch-header {
-    padding: 10px 20px;
   }
 }
 

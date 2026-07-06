@@ -2,23 +2,78 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- One-time auto-migration for users still landing on the legacy Netlify
+         subdomain (pre-rebrand bookmarks, pre-rebrand PWA installs). Runs
+         synchronously before any other scripts so the redirect happens before
+         React mounts or the service worker takes over. Preserves path, query,
+         and hash. Remove once analytics show no more traffic on the old host. -->
+    <script>
+      if (location.hostname === 'identityhide.netlify.app') {
+        location.replace('https://redactid.app' + location.pathname + location.search + location.hash);
+      }
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>IdentityHide — Protect Identities in Photos</title>
-    <meta name="description" content="IdentityHide protects identities in photos — blur faces, remove tattoos, and strip location metadata in your browser before you share." />
-    <meta name="theme-color" content="#0a0a0a" />
+    <title>Redact.ID | Share photos without revealing who you are</title>
+    <meta name="description" content="Redact.ID protects identities in photos. Blur faces, remove tattoos, and strip location metadata in your browser before you share." />
+    <meta name="theme-color" content="#0d0c0a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="IdentityHide" />
+    <meta name="apple-mobile-web-app-title" content="Redact.ID" />
     <link rel="manifest" href="/manifest.json" />
+    <!-- SVG favicon first for modern browsers (scales crisp at every tab size
+         and auto-adapts stroke color to the browser chrome). PNG fallback
+         stays for older browsers and any OS that doesn't grok SVG favicons. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    <meta property="og:title" content="IdentityHide — Protect Identities in Photos" />
-    <meta property="og:description" content="IdentityHide protects identities in photos — blur faces, remove tattoos, and strip location metadata in your browser before you share." />
-    <meta property="og:image" content="https://identity-hide.com/og-image.png" />
+    <meta property="og:title" content="Redact.ID | Share photos without revealing who you are" />
+    <meta property="og:description" content="Redact.ID protects identities in photos. Blur faces, remove tattoos, and strip location metadata in your browser before you share." />
+    <meta property="og:image" content="https://redactid.app/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Redact.ID: private photo redaction in your browser" />
+    <meta property="og:url" content="https://redactid.app/" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="https://identity-hide.com/og-image.png" />
+    <meta name="twitter:image" content="https://redactid.app/og-image.png" />
     <meta name="google-adsense-account" content="ca-pub-5282264563005092">
+    <meta name="msvalidate.01" content="7C9A7E6D6E6D590ADFC9E7515B6AC83E" />
+    <link rel="canonical" href="https://redactid.app/" />
+    <!-- Schema.org structured data: helps Google parse the site as a
+         WebApplication and surface richer search results (sitelinks, app
+         category, free price). Updated per-route by useDocumentMeta where
+         meaningful; the in-head block is the home/default. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Redact.ID",
+      "url": "https://redactid.app",
+      "description": "Browser-based photo redaction. Blur faces, remove tattoos, and strip location metadata before sharing, all client-side and free.",
+      "applicationCategory": "PhotoApplication",
+      "operatingSystem": "Any",
+      "browserRequirements": "Requires JavaScript and a modern browser",
+      "image": "https://redactid.app/og-image.png",
+      "screenshot": "https://redactid.app/og-image.png",
+      "isAccessibleForFree": true,
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "featureList": [
+        "Face blur with on-device AI",
+        "Tattoo removal via AI inpainting",
+        "EXIF and location metadata stripping",
+        "Batch processing"
+      ],
+      "publisher": {
+        "@type": "Organization",
+        "name": "Redact.ID",
+        "url": "https://redactid.app"
+      }
+    }
+    </script>
   </head>
   <body style="margin:0;">
     <div id="root"></div>
@@ -31,7 +86,13 @@
         window.__gpp = function() {};
       }
     </script>
-    <script type="text/javascript" src="https://cdn.applixir.com/applixir.app.v6.0.1.js"></script>
+    <!-- async: don't block HTML parsing while this third-party SDK downloads.
+         AppLixir is only invoked when the user taps "Watch ad" inside the
+         PaywallModal, which can't fire until after the React app mounts and
+         the user interacts — so by the time we need the SDK it's long since
+         loaded. rewardedAd.js logs a warning + skips gracefully if the SDK
+         isn't ready, so racey cases are non-fatal. -->
+    <script type="text/javascript" async src="https://cdn.applixir.com/applixir.app.v6.0.1.js"></script>
     <script>
       // Service worker registration lives in src/hooks/usePwaUpdate.js so the
       // React app can also detect new versions and prompt the user to reload.

@@ -1,0 +1,52 @@
+/* Full-width top banner shown while navigator.onLine is false.
+   Sits above every screen, styled in the accent-crimson family so it
+   reads as a live warning without mimicking a native OS alert. */
+.offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: var(--z-toast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px calc(12px + var(--safe-area-right)) 8px calc(12px + var(--safe-area-left));
+  padding-top: calc(8px + var(--safe-area-top));
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  line-height: 1.3;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  animation: offline-banner-enter var(--dur-base) ease-out;
+}
+
+.offline-banner-icon {
+  flex-shrink: 0;
+}
+
+.offline-banner-body {
+  /* Don't let wrapping stretch the banner past 2 lines on narrow phones. */
+  max-width: 520px;
+}
+
+@keyframes offline-banner-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .offline-banner {
+    animation: none;
+  }
+}

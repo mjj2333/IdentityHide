@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { rateLimit, checkOrigin } from './rateLimit.js';
 import { withSentry, captureException } from './_sentry.js';
+import { withCors } from './_cors.js';
 
 // Server-side allowlist of event names the client is permitted to emit.
 // THIS IS THE SOURCE OF TRUTH — if you add a new `track('foo', ...)` call in
@@ -12,13 +13,24 @@ const VALID_EVENTS = [
   'app_loaded', 'image_uploaded', 'mask_editor_entered', 'apply_clicked',
   'skip_clicked', 'review_entered', 'export_completed', 'blur_mode_changed',
   'comfyui_completed', 'comfyui_failed', 'start_over',
-  'face_auto_detect', 'blur_region_added', 'review_back', 'review_touch_up',
+  'face_auto_detect', 'blur_region_added', 'sticker_added', 'sticker_changed',
+  'review_back', 'review_touch_up',
   'walkthrough_seen', 'walkthrough_completed', 'walkthrough_skipped',
+  'walkthrough_turned_off',
   'pwa_update_available', 'pwa_update_applied', 'pwa_update_dismissed',
   'tier_selected', 'tier_modal_cancelled', 'tier_disabled_shown',
   'batch_upload', 'batch_images_added', 'batch_process_start',
   'batch_process_complete', 'batch_export_share', 'batch_export_individual',
   'batch_export_zip',
+  // Subscription + paywall events (Stripe)
+  'stripe_checkout_opened', 'stripe_checkout_completed',
+  'paywall_shown', 'paywall_subscribed', 'paywall_watched_ad', 'paywall_dismissed',
+  'credit_consumed', 'credit_earned',
+  'subscription_gated',
+  // Promo-code redemption (free access via admin-generated code)
+  'beta_code_redeemed',
+  // Landing page funnel
+  'landing_view', 'landing_enter', 'landing_install_click', 'landing_store_click',
 ];
 
 // Input limits. These are enforced with a 400 response (not silent
@@ -108,4 +120,4 @@ async function trackHandler(event) {
   }
 }
 
-export const handler = withSentry(trackHandler);
+export const handler = withCors(withSentry(trackHandler));

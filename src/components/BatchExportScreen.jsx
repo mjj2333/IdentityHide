@@ -3,6 +3,9 @@ import { useBatch } from '../context/BatchContext';
 import { buildBatchZip, applyBatchBlur, hasPaintedPixels } from '../utils/batchProcessor';
 import { canvasToBlob, downloadBlob } from '../utils/imageHelpers';
 import { track } from '../utils/analytics';
+import { isNativeApp } from '../utils/platform';
+import { shareNativeFile } from '../utils/nativeMedia';
+import ScreenShell from './ScreenShell';
 
 const FORMATS = [
   { key: 'png', label: 'PNG', mime: 'image/png' },
@@ -36,9 +39,11 @@ export default function BatchExportScreen({ onDone, onBack }) {
   }, [globalBlurSettings, globalFeather, updateImage]);
 
   const isIOS = useMemo(() => /iPad|iPhone|iPod/.test(navigator.userAgent), []);
+  const isNative = isNativeApp();
 
   const canShare = useMemo(() => {
-    if (!isIOS) return false; // Only use share sheet on iOS where "Save to Photos" is clear
+    if (isNative) return true; // Native shells always have a share sheet
+    if (!isIOS) return false; // iOS Safari is the only web target with "Save to Photos"
     if (typeof navigator === 'undefined' || !navigator.share || !navigator.canShare) return false;
     try {
       const testFile = new File(['test'], 'test.png', { type: 'image/png' });
@@ -46,9 +51,15 @@ export default function BatchExportScreen({ onDone, onBack }) {
     } catch {
       return false;
     }
-  }, [isIOS]);
+  }, [isIOS, isNative]);
 
-  // Share via Web Share API — saves directly to Photos on iOS/Android
+  // Multi-image "save all" flow.
+  //   - Web (iOS Safari): Web Share API with multiple File objects. iOS Photos
+  //     accepts the whole batch in one share sheet.
+  //   - Native: loop through images, opening the OS share sheet once per
+  //     image. Capacitor's @capacitor/share takes a single URL, so a batched
+  //     share isn't possible — but landing each image in Photos individually
+  //     is the right semantic for "Save N to Photos".
   const handleShareAll = useCallback(async () => {
     if (!canShare || doneImages.length === 0) return;
     setSharing(true);
@@ -57,8 +68,22 @@ export default function BatchExportScreen({ onDone, onBack }) {
     try {
       const mime = FORMATS.find(f => f.key === format)?.mime || 'image/png';
       const ext = format === 'jpg' ? 'jpg' : format;
-      const files = [];
 
+      if (isNative) {
+        for (const img of doneImages) {
+          const canvas = ensureOutputCanvas(img);
+          if (!canvas) continue;
+          const blob = await canvasToBlob(canvas, mime, quality / 100);
+          const stem = img.file?.name?.replace(/\.[^.]+$/, '') || 'image';
+          const filename = `${stem}_protected.${ext}`;
+          // If the user cancels mid-loop, abort the rest — they're done.
+          const { shared } = await shareNativeFile(blob, filename, mime);
+          if (!shared) break;
+        }
+        return;
+      }
+
+      const files = [];
       for (const img of doneImages) {
         const canvas = ensureOutputCanvas(img);
         if (!canvas) continue;
@@ -78,7 +103,7 @@ export default function BatchExportScreen({ onDone, onBack }) {
     } finally {
       setSharing(false);
     }
-  }, [canShare, doneImages, format, quality, ensureOutputCanvas]);
+  }, [canShare, doneImages, format, quality, ensureOutputCanvas, isNative]);
 
   // Download each file individually — on Android they go to Downloads and appear in Gallery
   const [downloadProgress, setDownloadProgress] = useState(null);
@@ -109,7 +134,9 @@ export default function BatchExportScreen({ onDone, onBack }) {
     setDownloadProgress(null);
   }, [doneImages, format, quality, ensureOutputCanvas]);
 
-  // Download as ZIP
+  // Download as ZIP. Native shells route through the OS share sheet so the
+  // user can save the .zip to Files, AirDrop it, etc. — a plain in-WebView
+  // <a download> doesn't have a filesystem destination on iOS/Android.
   const handleDownloadZip = useCallback(async () => {
     setDownloading(true);
     track('batch_export_zip', { count: doneImages.length, format });
@@ -122,13 +149,18 @@ export default function BatchExportScreen({ onDone, onBack }) {
         .map(img => ({ ...img, outputCanvas: ensureOutputCanvas(img) }))
         .filter(img => img.outputCanvas);
       const zipBlob = await buildBatchZip(imagesForZip, format, quality / 100);
-      downloadBlob(zipBlob, `identityhide_batch_${Date.now().toString(36)}.zip`);
+      const zipName = `redactid_batch_${Date.now().toString(36)}.zip`;
+      if (isNative) {
+        await shareNativeFile(zipBlob, zipName, 'application/zip');
+      } else {
+        downloadBlob(zipBlob, zipName);
+      }
     } catch (err) {
       console.error('[BatchExport] Zip failed:', err);
     } finally {
       setDownloading(false);
     }
-  }, [doneImages, format, quality, ensureOutputCanvas]);
+  }, [doneImages, format, quality, ensureOutputCanvas, isNative]);
 
   const handleDownloadOne = useCallback(async (img) => {
     setDownloadingId(img.id);
@@ -142,33 +174,114 @@ export default function BatchExportScreen({ onDone, onBack }) {
       const mime = FORMATS.find(f => f.key === format)?.mime || 'image/png';
       const blob = await canvasToBlob(canvas, mime, quality / 100);
       const stem = img.file?.name?.replace(/\.[^.]+$/, '') || 'image';
-      downloadBlob(blob, `${stem}_protected.${format === 'jpg' ? 'jpg' : format}`);
+      const filename = `${stem}_protected.${format === 'jpg' ? 'jpg' : format}`;
+      if (isNative) {
+        await shareNativeFile(blob, filename, mime);
+      } else {
+        downloadBlob(blob, filename);
+      }
     } catch (err) {
       console.error('[BatchExport] Single download failed:', err);
     } finally {
       setDownloadingId(null);
       setDownloading(false);
     }
-  }, [format, quality, ensureOutputCanvas]);
+  }, [format, quality, ensureOutputCanvas, isNative]);
 
   const handleDone = useCallback(() => {
     resetBatch();
     onDone();
   }, [resetBatch, onDone]);
 
-  return (
-    <div className="batch-screen">
-      <header className="batch-header">
-        <button className="btn btn-ghost" onClick={onBack}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-          Back
-        </button>
-        <h2 className="batch-title">Export</h2>
-        <span className="batch-count">{doneImages.length} photos ready</span>
-      </header>
+  const toolbarContent = (
+    <>
+      <div className="batch-controls">
+        <div className="batch-mode-toggle">
+          {FORMATS.map(f => (
+            <button
+              key={f.key}
+              className={`batch-mode-btn ${format === f.key ? 'active' : ''}`}
+              onClick={() => setFormat(f.key)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        {format !== 'png' && (
+          <div className="batch-slider-group">
+            <label className="batch-slider-label">
+              Quality
+              <input
+                type="range"
+                min="10"
+                max="100"
+                value={quality}
+                onChange={(e) => setQuality(Number(e.target.value))}
+                className="batch-slider"
+              />
+              <span className="batch-slider-value">{quality}%</span>
+            </label>
+          </div>
+        )}
+      </div>
 
+      <div className="batch-actions">
+        {/* iOS: Save to Photos via share sheet */}
+        {canShare && (
+          <button
+            className="btn btn-primary btn-lg"
+            onClick={handleShareAll}
+            disabled={sharing || downloading || doneImages.length === 0}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6, verticalAlign: -3 }}>
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+              <polyline points="16 6 12 2 8 6" />
+              <line x1="12" y1="2" x2="12" y2="15" />
+            </svg>
+            {sharing ? 'Preparing...' : `Save ${doneImages.length} to Photos`}
+          </button>
+        )}
+        {/* Non-iOS: Download individual files (appear in gallery on Android) */}
+        {!canShare && (
+          <button
+            className="btn btn-primary btn-lg"
+            onClick={handleDownloadIndividual}
+            disabled={downloading || doneImages.length === 0}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6, verticalAlign: -3 }}>
+              <path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+            </svg>
+            {downloadProgress
+              ? `Downloading ${downloadProgress.done}/${downloadProgress.total}...`
+              : `Download All (${doneImages.length})`
+            }
+          </button>
+        )}
+        <button
+          className="btn btn-ghost btn-lg"
+          onClick={handleDownloadZip}
+          disabled={downloading || doneImages.length === 0}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6, verticalAlign: -3 }}>
+            <path d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0-3-3m3 3 3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z" />
+          </svg>
+          {downloading && !downloadProgress ? 'Building ZIP...' : 'Download as ZIP'}
+        </button>
+        <button className="btn btn-ghost" onClick={handleDone}>
+          Done
+        </button>
+      </div>
+    </>
+  );
+
+  return (
+    <ScreenShell
+      backAction={onBack}
+      backLabel="Back"
+      stepLabel="Export"
+      topRight={<span className="top-bar-count">{doneImages.length} ready</span>}
+      toolbar={toolbarContent}
+    >
       <div className="batch-export-summary">
         <p>
           {doneImages.length} image{doneImages.length !== 1 ? 's' : ''} processed
@@ -206,93 +319,14 @@ export default function BatchExportScreen({ onDone, onBack }) {
               disabled={downloadingId === img.id}
               aria-label={`Download ${img.file?.name || 'image'}`}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
               </svg>
             </button>
           </div>
         ))}
       </div>
 
-      <div className="batch-bottom">
-        <div className="batch-controls">
-          <div className="batch-mode-toggle">
-            {FORMATS.map(f => (
-              <button
-                key={f.key}
-                className={`batch-mode-btn ${format === f.key ? 'active' : ''}`}
-                onClick={() => setFormat(f.key)}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          {format !== 'png' && (
-            <div className="batch-slider-group">
-              <label className="batch-slider-label">
-                Quality
-                <input
-                  type="range"
-                  min="10"
-                  max="100"
-                  value={quality}
-                  onChange={(e) => setQuality(Number(e.target.value))}
-                  className="batch-slider"
-                />
-                <span className="batch-slider-value">{quality}%</span>
-              </label>
-            </div>
-          )}
-        </div>
-
-        <div className="batch-actions">
-          {/* iOS: Save to Photos via share sheet */}
-          {canShare && (
-            <button
-              className="btn btn-primary btn-lg"
-              onClick={handleShareAll}
-              disabled={sharing || downloading || doneImages.length === 0}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6, verticalAlign: -3 }}>
-                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-                <polyline points="16 6 12 2 8 6" />
-                <line x1="12" y1="2" x2="12" y2="15" />
-              </svg>
-              {sharing ? 'Preparing...' : `Save ${doneImages.length} to Photos`}
-            </button>
-          )}
-          {/* Non-iOS: Download individual files (appear in gallery on Android) */}
-          {!canShare && (
-            <button
-              className="btn btn-primary btn-lg"
-              onClick={handleDownloadIndividual}
-              disabled={downloading || doneImages.length === 0}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 6, verticalAlign: -3 }}>
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              {downloadProgress
-                ? `Saving ${downloadProgress.done}/${downloadProgress.total}...`
-                : `Save All (${doneImages.length})`
-              }
-            </button>
-          )}
-          <button
-            className="btn btn-ghost btn-lg"
-            onClick={handleDownloadZip}
-            disabled={downloading || doneImages.length === 0}
-          >
-            {downloading && !downloadProgress ? 'Building ZIP...' : 'Download as ZIP'}
-          </button>
-          <button className="btn btn-ghost" onClick={handleDone}>
-            Done
-          </button>
-        </div>
-      </div>
-    </div>
+    </ScreenShell>
   );
 }

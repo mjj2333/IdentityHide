@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import ScreenShell from './ScreenShell';
+import { apiUrl } from '../utils/api';
 
 const CATEGORIES = [
-  { value: 'bug', label: 'Bug / Error', icon: 'M12 9v2m0 4h.01M5.07 19H19a2 2 0 0 0 1.75-2.96l-7-12a2 2 0 0 0-3.5 0l-7 12A2 2 0 0 0 5.07 19z' },
-  { value: 'ux', label: 'UI / UX Issue', icon: 'M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z' },
-  { value: 'feature', label: 'Feature Request', icon: 'M12 2v4m0 12v4m-7-7H1m22 0h-4m-2.64-6.36l-2.83 2.83m9.9 9.9l-2.83-2.83M6.34 6.34L3.51 3.51m9.9 9.9l-2.83 2.83' },
-  { value: 'general', label: 'General Feedback', icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
+  { value: 'bug', label: 'Bug / Error', icon: 'M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.008v.008H12v-.008Z' },
+  { value: 'ux', label: 'UI / UX Issue', icon: 'M15.042 21.672 13.684 16.6m0 0-2.51 2.225.569-9.47 5.227 7.917-3.286-.672Zm-7.518-.267A8.25 8.25 0 1 1 20.25 10.5M8.288 14.212A5.25 5.25 0 1 1 17.25 10.5' },
+  { value: 'feature', label: 'Feature Request', icon: 'M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.383a14.406 14.406 0 0 1-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 1 0-7.517 0c.85.493 1.509 1.333 1.509 2.316V18' },
+  { value: 'general', label: 'General Feedback', icon: 'M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z' },
 ];
 
 const SEVERITIES = [
@@ -61,7 +62,7 @@ export default function FeedbackScreen({ onBack }) {
     setError('');
     setSubmitting(true);
     try {
-      const res = await fetch('/.netlify/functions/feedback', {
+      const res = await fetch(apiUrl('/.netlify/functions/feedback'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -93,7 +94,7 @@ export default function FeedbackScreen({ onBack }) {
               <polyline points="22 4 12 14.01 9 11.01" />
             </svg>
             <h2>Thank you!</h2>
-            <p>Your feedback is invaluable and will directly help us improve IdentityHide.</p>
+            <p>Your feedback is invaluable and will directly help us improve Redact.ID.</p>
             <div className="feedback-success-actions">
               <button className="btn btn-primary" onClick={() => {
                 setSubmitted(false);
@@ -115,8 +116,8 @@ export default function FeedbackScreen({ onBack }) {
   return (
     <ScreenShell backAction={onBack} backLabel="Back">
       <div className="feedback-container">
-        <h2 className="feedback-title">Beta Feedback</h2>
-        <p className="feedback-subtitle">Help us improve IdentityHide. All feedback is reviewed by the team.</p>
+        <h2 className="feedback-title">Feedback</h2>
+        <p className="feedback-subtitle">Help us improve Redact.ID. All feedback is reviewed by the team.</p>
 
         <div className="feedback-section">
           <div id="feedback-category-label" className="feedback-label">What type of feedback?</div>

@@ -1,7 +1,8 @@
 import { useCallback, useRef } from 'react';
 import { usePipeline } from '../context/PipelineContext';
 import { extractMetadata } from '../utils/metadataExtractor';
-import { fileToCanvas, downscaleToMegapixels } from '../utils/imageHelpers';
+import { fileToCanvas, downscaleToMegapixels, capToMaxDimension } from '../utils/imageHelpers';
+import { getMaxWorkingDimension } from '../utils/platform';
 import { uploadImage, uploadMask, queueAndWait, downloadOutputImage, prewarmFluxModels } from '../utils/comfyuiApi';
 import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from '../utils/comfyuiWorkflows';
 import { useFaceDetection } from './useFaceDetection';
@@ -29,6 +30,7 @@ export function useImagePipeline() {
     tattooMaskCanvasRef,
     inpaintedCanvasRef,
     fullResCanvasRef,
+    tattooCreditClaimedRef,
     setScreen,
   } = usePipeline();
 
@@ -44,6 +46,9 @@ export function useImagePipeline() {
       const gen = ++pipelineGenRef.current;
       setStatus('stripping');
       setError(null);
+      // Fresh image = fresh credit-claim state. Retouches within the same
+      // image keep the existing (true) value so we don't double-charge.
+      if (tattooCreditClaimedRef) tattooCreditClaimedRef.current = false;
 
       // Release previous canvas bitmap memory before allocating new ones
       for (const ref of [fullResCanvasRef, strippedCanvasRef, originalCanvasRef, outputCanvasRef, tattooMaskCanvasRef, inpaintedCanvasRef]) {
@@ -54,12 +59,23 @@ export function useImagePipeline() {
       setMetadata(meta);
 
       // Strip metadata by re-encoding through canvas
-      const cleanCanvas = await fileToCanvas(file);
+      let cleanCanvas = await fileToCanvas(file);
 
-      // Store full-res original for export upscaling
+      // Cap the working image on memory-constrained devices. A 12–24MP photo
+      // spawns several full-res canvases at once (clean, work, output, mask,
+      // preview) plus a detection tensor — enough to get the tab killed in iOS
+      // Safari. Desktop keeps full resolution (its cap is just a safety net).
+      const capped = capToMaxDimension(cleanCanvas, getMaxWorkingDimension());
+      if (capped.scaled) {
+        cleanCanvas.width = 0;
+        cleanCanvas.height = 0;
+        cleanCanvas = capped.canvas;
+      }
+
+      // Store the (capped) clean canvas for the before/after compare slider.
       fullResCanvasRef.current = cleanCanvas;
 
-      // Downscale to the user-selected working resolution (1/2/4/12 MP tier)
+      // Downscale to the user-selected working resolution (Quick 1MP / Original)
       const { canvas: workCanvas } = downscaleToMegapixels(cleanCanvas, tierMP);
       strippedCanvasRef.current = workCanvas;
 
@@ -161,7 +177,7 @@ export function useImagePipeline() {
       if (hasMask) {
         checkAborted();
         if (onProgress) onProgress({ message: 'Uploading image...', fraction: 0.05 });
-        const imageName = await uploadImage(src, 'identityhide_input.png', { signal });
+        const imageName = await uploadImage(src, 'redactid_input.png', { signal });
         checkAborted();
         console.log(`[PIPELINE] Uploaded image: ${imageName} (${src.width}x${src.height})`);
 
@@ -177,7 +193,7 @@ export function useImagePipeline() {
         }
 
         if (onProgress) onProgress({ message: 'Uploading mask...', fraction: 0.1 });
-        const maskName = await uploadMask(maskToUpload, 'identityhide_mask.png', { signal });
+        const maskName = await uploadMask(maskToUpload, 'redactid_mask.png', { signal });
         console.log(`[PIPELINE] Uploaded mask: ${maskName}`);
         checkAborted();
 
@@ -253,7 +269,8 @@ export function useImagePipeline() {
             fmCtx.fill();
           }
 
-          resultCanvas = applyMaskedBlur(resultCanvas, faceMask, blurMode, blurRadius, faceDetections);
+          // Auto-blur after inpaint: blur the detected-face mask, no stickers.
+          resultCanvas = applyMaskedBlur(resultCanvas, faceMask, blurMode, blurRadius, []);
         }
       }
 
@@ -304,7 +321,7 @@ export function useImagePipeline() {
       fmCtx.fill();
     }
 
-    const blurred = applyMaskedBlur(base, faceMask, mode, strength, detections);
+    const blurred = applyMaskedBlur(base, faceMask, mode, strength, []);
     const prevOutput = outputCanvasRef.current;
     if (prevOutput && prevOutput !== blurred && prevOutput !== base) { prevOutput.width = 0; prevOutput.height = 0; }
     outputCanvasRef.current = blurred;

@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { rateLimit, checkOrigin } from './rateLimit.js';
 import { authenticateAdmin } from './auth.js';
 import { withSentry, captureException } from './_sentry.js';
+import { withCors } from './_cors.js';
 
 let supabase;
 function getClient() {
@@ -158,4 +159,4 @@ async function feedbackHandler(event) {
   }
 }
 
-export const handler = withSentry(feedbackHandler);
+export const handler = withCors(withSentry(feedbackHandler));

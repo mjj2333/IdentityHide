@@ -1,14 +1,21 @@
 import { Component, useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { PipelineProvider, usePipeline } from './context/PipelineContext';
 import { BatchProvider, useBatch } from './context/BatchContext';
+import { EntitlementProvider } from './context/EntitlementContext';
 import DropZone from './components/DropZone';
 import LoadingOverlay from './components/LoadingOverlay';
 import ThemeToggle from './components/ThemeToggle';
 import InstallPrompt from './components/InstallPrompt';
 import UpdatePrompt from './components/UpdatePrompt';
+import OfflineBanner from './components/OfflineBanner';
 import ConfirmModal from './components/ConfirmModal';
 import { usePwaUpdate } from './hooks/usePwaUpdate';
 import { captureException } from './utils/sentry';
+import { track } from './utils/analytics';
+import { isNativeApp } from './utils/platform';
+import DeepLinkHandler from './components/DeepLinkHandler';
+import BackButtonHandler from './components/BackButtonHandler';
+import StatusBarConfig from './components/StatusBarConfig';
 import './styles/global.css';
 
 const MaskEditorScreen = lazy(() => import('./components/MaskEditorScreen'));
@@ -22,6 +29,22 @@ const FeedbackScreen = lazy(() => import('./components/FeedbackScreen'));
 const TermsScreen = lazy(() => import('./components/TermsScreen'));
 const PrivacyScreen = lazy(() => import('./components/PrivacyScreen'));
 const FaqScreen = lazy(() => import('./components/FaqScreen'));
+const AccountScreen = lazy(() => import('./components/AccountScreen'));
+const LandingScreen = lazy(() => import('./components/LandingScreen'));
+
+// True when running as an installed/standalone PWA (or iOS standalone). Such
+// launches should go straight to the tool, never the marketing landing.
+function isStandaloneDisplay() {
+  try {
+    return (
+      window.matchMedia?.('(display-mode: standalone)')?.matches === true ||
+      window.matchMedia?.('(display-mode: fullscreen)')?.matches === true ||
+      window.navigator.standalone === true
+    );
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Screen-level error boundary — catches crashes in lazy-loaded screens and
@@ -75,6 +98,14 @@ function ScreenRouter() {
   }, [warning, warningSticky, setWarning]);
   const feedbackReturnRef = useRef(null);
   const skipPushRef = useRef(false);
+
+  useEffect(() => {
+    track('app_loaded', {
+      device: /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+      screen_width: window.innerWidth,
+      screen_height: window.innerHeight,
+    });
+  }, []);
 
   // Push history state when screen changes (enables browser back button)
   useEffect(() => {
@@ -190,6 +221,22 @@ export default function App() {
   // route including /admin and /feedback.
   const { updateReady, applyUpdate, dismiss: dismissUpdate } = usePwaUpdate();
 
+  // Marketing landing gate. Shown only to first-time browser visitors at the
+  // bare root. Installed PWAs, native apps, post-checkout returns (?session_id
+  // and friends carry a query string), and anyone who has already entered this
+  // session skip straight to the tool.
+  const showLandingInitially =
+    pathname === '/' &&
+    !window.location.search &&
+    !isNativeApp() &&
+    !isStandaloneDisplay() &&
+    (() => { try { return sessionStorage.getItem('redact_entered') !== '1'; } catch { return true; } })();
+  const [showLanding, setShowLanding] = useState(showLandingInitially);
+  const enterApp = () => {
+    try { sessionStorage.setItem('redact_entered', '1'); } catch { /* ignore */ }
+    setShowLanding(false);
+  };
+
   useEffect(() => {
     const root = document.documentElement;
     // Capture the viewport ref once so the cleanup uses the exact same target
@@ -221,11 +268,14 @@ export default function App() {
   }, []);
 
   const updatePrompt = (
-    <UpdatePrompt
-      visible={updateReady}
-      onReload={applyUpdate}
-      onDismiss={dismissUpdate}
-    />
+    <>
+      <OfflineBanner />
+      <UpdatePrompt
+        visible={updateReady}
+        onReload={applyUpdate}
+        onDismiss={dismissUpdate}
+      />
+    </>
   );
 
   if (pathname === '/admin') {
@@ -278,13 +328,45 @@ export default function App() {
     );
   }
 
-  return (
-    <PipelineProvider>
-      <BatchProvider>
-        <ScreenRouter />
-        <InstallPrompt />
+  if (pathname === '/account') {
+    return (
+      <EntitlementProvider>
+        <Suspense fallback={null}>
+          <ThemeToggle />
+          <AccountScreen onBack={() => { window.location.href = '/'; }} />
+          {updatePrompt}
+        </Suspense>
+      </EntitlementProvider>
+    );
+  }
+
+  // First-time browser visitors at the root see the marketing landing until
+  // they choose to enter the tool. Lazy-loaded so deep-linkers never pay for it.
+  if (showLanding) {
+    return (
+      <Suspense fallback={null}>
+        <LandingScreen onEnter={enterApp} />
         {updatePrompt}
-      </BatchProvider>
-    </PipelineProvider>
+      </Suspense>
+    );
+  }
+
+  // Main app — includes EntitlementProvider so MaskEditor/BatchGrid can gate
+  // features on subscription status. /success?session_id=… also lands here;
+  // EntitlementContext's mount effect handles the post-checkout lookup and
+  // cleans the URL back to /.
+  return (
+    <EntitlementProvider>
+      <DeepLinkHandler />
+      <BackButtonHandler />
+      <StatusBarConfig />
+      <PipelineProvider>
+        <BatchProvider>
+          <ScreenRouter />
+          {!isNativeApp() && <InstallPrompt />}
+          {updatePrompt}
+        </BatchProvider>
+      </PipelineProvider>
+    </EntitlementProvider>
   );
 }

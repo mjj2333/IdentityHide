@@ -1,12 +1,19 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useBatch } from '../context/BatchContext';
 import { usePipeline } from '../context/PipelineContext';
+import { useEntitlement } from '../context/EntitlementContext';
 import { useFaceDetection } from '../hooks/useFaceDetection';
 import { prepareImage, processBatchCombined, hasPaintedPixels, buildFaceMask, createThumbnail, canvasToBlobUrl } from '../utils/batchProcessor';
-import { applyMaskedBlur, BLUR_MODES } from '../utils/blurEngine';
+import { applyMaskedBlur, BAR_STYLES } from '../utils/blurEngine';
+import ColorSpectrumPicker from './ColorSpectrumPicker';
 import { track } from '../utils/analytics';
+import { useCoachMarks, suppressAllWalkthroughs } from '../hooks/useCoachMarks';
+import CoachMark from './CoachMark';
 import ConfirmModal from './ConfirmModal';
 import BatchProcessModal from './BatchProcessModal';
+import RedeemCodeModal from './RedeemCodeModal';
+import ScreenShell from './ScreenShell';
 import '../styles/BatchGrid.css';
 
 function makeId() {
@@ -27,11 +34,33 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
 
   const { detect } = useFaceDetection();
   const { setWarning, selectedTierMP } = usePipeline();
+  const { premium, loading: entitlementLoading } = useEntitlement();
   const [showConfirmBack, setShowConfirmBack] = useState(false);
   const [showProcessModal, setShowProcessModal] = useState(false);
+  const [showRedeem, setShowRedeem] = useState(false);
   const fileInputRef = useRef(null);
   const detectingRef = useRef(false);
   const processAbortRef = useRef(null);
+  const batchGridRef = useRef(null);
+
+  // Global Stickers dropdown (mirrors the editor selector, minus freehand).
+  const [barStyleMenuOpen, setBarStyleMenuOpen] = useState(false);
+  const [barStyleMenuPos, setBarStyleMenuPos] = useState(null);
+  const [barColorPickerOpen, setBarColorPickerOpen] = useState(false);
+  const barStyleMenuWrapRef = useRef(null);
+  const barStyleTriggerRef = useRef(null);
+  const barStyleMenuElRef = useRef(null);
+  useEffect(() => {
+    if (!barStyleMenuOpen) return;
+    const onDown = (e) => {
+      if (barStyleMenuWrapRef.current && !barStyleMenuWrapRef.current.contains(e.target)
+          && (!barStyleMenuElRef.current || !barStyleMenuElRef.current.contains(e.target))) {
+        setBarStyleMenuOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [barStyleMenuOpen]);
 
   // Run face detection on any image that needs it.
   // Stores the unblurred thumbnail — the blur-preview regen effect below
@@ -86,16 +115,20 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
 
       regenCancelRef.current = false;
       const { mode, strength } = globalBlurSettings;
-      const barSettings = mode === 'blackbar' ? { width: globalBlurSettings.barWidth ?? 20, length: globalBlurSettings.barLength ?? 110, angle: globalBlurSettings.barAngle ?? 0 } : null;
+      const wantBlur = mode === 'gaussian' || mode === 'pixelate';
       (async () => {
-        for (const img of eligible) {
+        for (let i = 0; i < eligible.length; i++) {
+          const img = eligible[i];
           if (regenCancelRef.current) return;
-          const mask = buildFaceMask(img.detections, img.strippedCanvas.width, img.strippedCanvas.height, mode, globalFeather);
-          const blurred = applyMaskedBlur(img.strippedCanvas, mask, mode, strength, img.detections, barSettings);
+          const w = img.strippedCanvas.width, h = img.strippedCanvas.height;
+          const blurMask = wantBlur ? buildFaceMask(img.detections, w, h, mode, globalFeather) : null;
+          // Grid thumbnails show the global blur only; stickers are placed
+          // per-image in the editor, so no sticker objects here.
+          const blurred = applyMaskedBlur(img.strippedCanvas, blurMask, wantBlur ? mode : 'none', strength, [], null, globalBlurSettings.barColor || '#000000');
           const thumbCanvas = createThumbnail(blurred);
           const thumbUrl = await canvasToBlobUrl(thumbCanvas);
           blurred.width = 0; blurred.height = 0;
-          mask.width = 0; mask.height = 0;
+          if (blurMask) { blurMask.width = 0; blurMask.height = 0; }
           if (regenCancelRef.current) {
             // Cancel tripped during canvasToBlobUrl — release what we just
             // allocated. Also: we haven't revoked the old img.thumbnailUrl
@@ -108,6 +141,14 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
           // Committed — swap in the new thumbnail and revoke the old URL.
           if (img.thumbnailUrl) URL.revokeObjectURL(img.thumbnailUrl);
           updateImage(img.id, { thumbnailCanvas: thumbCanvas, thumbnailUrl: thumbUrl, _blurKey: settingsKey });
+          // Yield to the event loop between thumbnails so the browser can
+          // paint the new thumbnail before we start the next blur. Without
+          // this, several thumbnails get computed and committed in the same
+          // task, producing a "pop-pop-pop" burst instead of a smooth one-
+          // by-one fill. Only yield between thumbnails (not after the last).
+          if (i < eligible.length - 1) {
+            await new Promise((r) => setTimeout(r, 0));
+          }
         }
       })();
     }, 150);
@@ -188,6 +229,15 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
     }
   }, [removeImage, handleThumbnailClick]);
 
+  // Track once per visit when a non-premium user lands on the gated batch
+  // screen — same `subscription_gated` signal we used to fire on Subscribe
+  // clicks back when subscribe was a button on this gate.
+  useEffect(() => {
+    if (!premium && !entitlementLoading) {
+      track('subscription_gated', { surface: 'batch' });
+    }
+  }, [premium, entitlementLoading]);
+
   const allDetected = images.length > 0 && images.every(img =>
     img.status === 'ready' || img.status === 'no-faces' || img.status === 'edited' || img.status === 'done' || img.status === 'error'
   );
@@ -195,6 +245,16 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
   // done — covers both the "returned-from-export" accidental-tap case and
   // the intentional "changed settings / edited a card" re-run case.
   const anyDone = images.some(img => img.status === 'done');
+
+  // Only one coach step so far — the per-image tap-to-edit tip that used
+  // to live as persistent hint text above the grid. `skip` makes sure it
+  // doesn't fire until the user actually has something to tap on.
+  const COACH_STEPS = [
+    { targetRef: batchGridRef, position: 'bottom', title: 'Fine-tune per image', body: 'Tap any photo to adjust its blur regions before processing.' },
+  ];
+  const coachMarks = useCoachMarks('batchGrid', COACH_STEPS.length, {
+    skip: !allDetected || images.length === 0,
+  });
 
   // Parity with ReviewScreen's metadata summary in the single-image flow.
   // Canvas re-encode always strips EXIF; the interesting signal for users
@@ -344,28 +404,253 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
     }
   };
 
+  // Batch processing is a paid feature. Free users hit an upgrade CTA
+  // instead of the grid. We still render the standard header so the back
+  // button works. `entitlementLoading` gates the gate itself — we wait for
+  // the first entitlement check to resolve before deciding which view to
+  // show, so a subscribed user reloading the page doesn't flash the CTA.
+  if (!premium && !entitlementLoading) {
+    return (
+      <>
+        <ScreenShell
+          backAction={onBack}
+          backLabel="Back"
+          stepLabel="Batch Protect"
+          topRight={images.length > 0 ? <span className="top-bar-count">{images.length}/20</span> : null}
+        >
+          <div className="batch-upgrade-gate">
+            <h3>Batch processing is a Protect+ feature</h3>
+            <p>Redeem a promo code for free access to batch processing, unlimited tattoo removal, and an ad-free experience.</p>
+            <div className="batch-upgrade-actions">
+              <button className="btn btn-primary btn-lg" onClick={() => setShowRedeem(true)}>
+                Redeem a promo code
+              </button>
+            </div>
+          </div>
+        </ScreenShell>
+        {showRedeem && (
+          <RedeemCodeModal
+            onClose={() => setShowRedeem(false)}
+            onSuccess={() => setShowRedeem(false)}
+          />
+        )}
+      </>
+    );
+  }
+
+  const gStickerOn = !!globalBlurSettings.stickerEnabled;
+  const gWantBlur = globalBlurSettings.mode === 'gaussian' || globalBlurSettings.mode === 'pixelate';
+  const gActiveBarStyle = BAR_STYLES.find((s) => s.key === (globalBlurSettings.barStyle || 'solid')) || BAR_STYLES[0];
+
+  const toolbarContent = (
+    <>
+      <div className="batch-controls">
+        <div className="batch-mode-toggle">
+          {[{ value: 'gaussian', label: 'Gaussian' }, { value: 'pixelate', label: 'Pixelate' }].map(opt => (
+            <button
+              key={opt.value}
+              className={`batch-mode-btn ${globalBlurSettings.mode === opt.value ? 'active' : ''}`}
+              onClick={() => setGlobalBlurSettings(prev => ({ ...prev, mode: prev.mode === opt.value ? 'none' : opt.value }))}
+            >
+              {opt.label}
+            </button>
+          ))}
+          <div className="bar-style-menu-wrap" ref={barStyleMenuWrapRef} style={{ position: 'relative', display: 'inline-flex' }}>
+            <button
+              ref={barStyleTriggerRef}
+              className={`batch-mode-btn ${gStickerOn ? 'active' : ''}`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+              aria-haspopup="menu"
+              aria-expanded={barStyleMenuOpen}
+              aria-pressed={gStickerOn}
+              onClick={() => {
+                setBarStyleMenuOpen(v => {
+                  const next = !v;
+                  if (next && barStyleTriggerRef.current) {
+                    const r = barStyleTriggerRef.current.getBoundingClientRect();
+                    setBarStyleMenuPos({ left: r.left, bottom: window.innerHeight - r.top + 4 });
+                  }
+                  return next;
+                });
+              }}
+            >
+              <span>{gStickerOn ? gActiveBarStyle.label : 'Stickers'}</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            {barStyleMenuOpen && barStyleMenuPos && createPortal(
+              <div
+                ref={barStyleMenuElRef}
+                className="bar-style-menu"
+                role="menu"
+                aria-label="Stickers"
+                style={{ left: barStyleMenuPos.left, bottom: barStyleMenuPos.bottom }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="bar-style-menu-item bar-style-menu-color"
+                  onClick={() => { setBarStyleMenuOpen(false); setBarColorPickerOpen(true); }}
+                >
+                  <span className="bar-style-menu-swatch" style={{ background: globalBlurSettings.barColor || '#000000' }} aria-hidden="true" />
+                  <span>Color…</span>
+                </button>
+                <div className="bar-style-menu-divider" role="separator" />
+                {BAR_STYLES.map((s) => {
+                  const sel = gStickerOn && (globalBlurSettings.barStyle || 'solid') === s.key;
+                  return (
+                    <button
+                      key={s.key}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={sel}
+                      className={`bar-style-menu-item${sel ? ' is-active' : ''}`}
+                      onClick={() => {
+                        setGlobalBlurSettings(prev => ({ ...prev, stickerEnabled: true, barStyle: s.key }));
+                        setBarStyleMenuOpen(false);
+                      }}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })}
+                {gStickerOn && (
+                  <>
+                    <div className="bar-style-menu-divider" role="separator" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="bar-style-menu-item bar-style-menu-off"
+                      onClick={() => { setGlobalBlurSettings(prev => ({ ...prev, stickerEnabled: false })); setBarStyleMenuOpen(false); }}
+                    >
+                      Turn off stickers
+                    </button>
+                  </>
+                )}
+              </div>,
+              document.body
+            )}
+          </div>
+        </div>
+        <div className="batch-slider-group">
+          {gWantBlur && (
+            <>
+              <label className="batch-slider-label">
+                Strength
+                <input
+                  type="range"
+                  min="5"
+                  max="60"
+                  value={globalBlurSettings.strength}
+                  onChange={(e) => setGlobalBlurSettings(prev => ({ ...prev, strength: Number(e.target.value) }))}
+                  className="batch-slider"
+                />
+                <span className="batch-slider-value">{globalBlurSettings.strength}</span>
+              </label>
+              <label className="batch-slider-label">
+                Feather
+                <input
+                  type="range"
+                  min="0"
+                  max="60"
+                  value={globalFeather}
+                  onChange={(e) => setGlobalFeather(Number(e.target.value))}
+                  className="batch-slider"
+                />
+                <span className="batch-slider-value">{globalFeather}</span>
+              </label>
+            </>
+          )}
+          {gStickerOn && (
+            <>
+              <label className="batch-slider-label">
+                Width
+                <input
+                  type="range"
+                  min="5"
+                  max="80"
+                  value={globalBlurSettings.barWidth}
+                  onChange={(e) => setGlobalBlurSettings(prev => ({ ...prev, barWidth: Number(e.target.value) }))}
+                  className="batch-slider"
+                />
+                <span className="batch-slider-value">{globalBlurSettings.barWidth}</span>
+              </label>
+              <label className="batch-slider-label">
+                Length
+                <input
+                  type="range"
+                  min="50"
+                  max="200"
+                  value={globalBlurSettings.barLength}
+                  onChange={(e) => setGlobalBlurSettings(prev => ({ ...prev, barLength: Number(e.target.value) }))}
+                  className="batch-slider"
+                />
+                <span className="batch-slider-value">{globalBlurSettings.barLength}</span>
+              </label>
+              <label className="batch-slider-label">
+                Angle
+                <input
+                  type="range"
+                  min="-45"
+                  max="45"
+                  value={globalBlurSettings.barAngle}
+                  onChange={(e) => setGlobalBlurSettings(prev => ({ ...prev, barAngle: Number(e.target.value) }))}
+                  className="batch-slider"
+                />
+                <span className="batch-slider-value">{globalBlurSettings.barAngle}&deg;</span>
+              </label>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="batch-actions">
+        {batchStatus === 'processing' && (
+          <div className="batch-progress" role="status" aria-live="polite">
+            <div className="batch-progress-bar">
+              <div
+                className="batch-progress-fill"
+                style={{ width: `${(processedCount / images.length) * 100}%` }}
+              />
+            </div>
+            <span className="batch-progress-text">{processedCount}/{images.length}</span>
+          </div>
+        )}
+        {batchStatus === 'processing' ? (
+          <button
+            className="btn btn-ghost btn-lg"
+            onClick={handleCancelProcessing}
+          >
+            Cancel ({processedCount}/{images.length})
+          </button>
+        ) : (
+          <button
+            className="btn btn-primary btn-lg"
+            onClick={handleProcessAll}
+            disabled={!allDetected || images.length === 0}
+          >
+            {anyDone ? 'Re-process All' : 'Process All'} ({images.length})
+          </button>
+        )}
+      </div>
+    </>
+  );
+
   return (
-    <div className="batch-screen">
-      <header className="batch-header">
-        <button className="btn btn-ghost" onClick={handleBack}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6" />
-          </svg>
-          Back
-        </button>
-        <h2 className="batch-title">Batch Protect</h2>
-        <span className="batch-count">{images.length}/20 photos</span>
-      </header>
-
-      {allDetected && images.length > 0 && (
-        <p className="batch-hint">Tap any photo to adjust its blur regions</p>
-      )}
-
+    <>
+      <ScreenShell
+        backAction={handleBack}
+        backLabel="Back"
+        stepLabel="Batch Protect"
+        topRight={<span className="top-bar-count">{images.length}/20</span>}
+        toolbar={toolbarContent}
+      >
       {metadataSummary && (
         <p className="batch-metadata-summary" role="status">{metadataSummary}</p>
       )}
 
-      <div className="batch-grid">
+      <div className="batch-grid" ref={batchGridRef}>
         {images.map(img => (
           // Using <div role="button"> instead of <button> so the remove-× can
           // live inside without producing nested interactive elements — the
@@ -404,9 +689,8 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
             )}
             {img.strippedCanvas && (
               <div className="batch-card-edit-icon">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
                 </svg>
               </div>
             )}
@@ -429,10 +713,12 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
 
         {images.length < 20 && (
           <button className="batch-card batch-card-add" onClick={handleAddMore}>
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <span>Add More</span>
+            <span className="batch-card-add-inner">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              <span>Add More</span>
+            </span>
           </button>
         )}
       </div>
@@ -447,123 +733,7 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
         aria-label="Add more images"
       />
 
-      <div className="batch-bottom">
-        <div className="batch-controls">
-          <div className="batch-mode-toggle">
-            {BLUR_MODES.map(m => (
-              <button
-                key={m.key}
-                className={`batch-mode-btn ${globalBlurSettings.mode === m.key ? 'active' : ''}`}
-                onClick={() => setGlobalBlurSettings(prev => ({ ...prev, mode: m.key }))}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-          <div className="batch-slider-group">
-            {globalBlurSettings.mode === 'blackbar' ? (
-              <>
-                <label className="batch-slider-label">
-                  Width
-                  <input
-                    type="range"
-                    min="5"
-                    max="80"
-                    value={globalBlurSettings.barWidth}
-                    onChange={(e) => setGlobalBlurSettings(prev => ({ ...prev, barWidth: Number(e.target.value) }))}
-                    className="batch-slider"
-                  />
-                  <span className="batch-slider-value">{globalBlurSettings.barWidth}</span>
-                </label>
-                <label className="batch-slider-label">
-                  Length
-                  <input
-                    type="range"
-                    min="50"
-                    max="200"
-                    value={globalBlurSettings.barLength}
-                    onChange={(e) => setGlobalBlurSettings(prev => ({ ...prev, barLength: Number(e.target.value) }))}
-                    className="batch-slider"
-                  />
-                  <span className="batch-slider-value">{globalBlurSettings.barLength}</span>
-                </label>
-                <label className="batch-slider-label">
-                  Angle
-                  <input
-                    type="range"
-                    min="-45"
-                    max="45"
-                    value={globalBlurSettings.barAngle}
-                    onChange={(e) => setGlobalBlurSettings(prev => ({ ...prev, barAngle: Number(e.target.value) }))}
-                    className="batch-slider"
-                  />
-                  <span className="batch-slider-value">{globalBlurSettings.barAngle}&deg;</span>
-                </label>
-              </>
-            ) : (
-              <>
-                <label className="batch-slider-label">
-                  Strength
-                  <input
-                    type="range"
-                    min="5"
-                    max="60"
-                    value={globalBlurSettings.strength}
-                    onChange={(e) => setGlobalBlurSettings(prev => ({ ...prev, strength: Number(e.target.value) }))}
-                    className="batch-slider"
-                  />
-                  <span className="batch-slider-value">{globalBlurSettings.strength}</span>
-                </label>
-                <label className="batch-slider-label">
-                  Feather
-                  <input
-                    type="range"
-                    min="0"
-                    max="60"
-                    value={globalFeather}
-                    onChange={(e) => setGlobalFeather(Number(e.target.value))}
-                    className="batch-slider"
-                  />
-                  <span className="batch-slider-value">{globalFeather}</span>
-                </label>
-              </>
-            )}
-          </div>
-        </div>
-
-        <div className="batch-actions">
-          {batchStatus === 'processing' && (
-            <div className="batch-progress" role="status" aria-live="polite">
-              <div className="batch-progress-bar">
-                <div
-                  className="batch-progress-fill"
-                  style={{ width: `${(processedCount / images.length) * 100}%` }}
-                />
-              </div>
-              <span className="batch-progress-text">{processedCount}/{images.length} processed</span>
-              {currentImageLabel && (
-                <span className="batch-progress-substep">{currentImageLabel}</span>
-              )}
-            </div>
-          )}
-          {batchStatus === 'processing' ? (
-            <button
-              className="btn btn-ghost btn-lg"
-              onClick={handleCancelProcessing}
-            >
-              Cancel ({processedCount}/{images.length})
-            </button>
-          ) : (
-            <button
-              className="btn btn-primary btn-lg"
-              onClick={handleProcessAll}
-              disabled={!allDetected || images.length === 0}
-            >
-              {anyDone ? 'Re-process All' : 'Process All'} ({images.length})
-            </button>
-          )}
-        </div>
-      </div>
+      </ScreenShell>
 
       {showConfirmBack && (
         <ConfirmModal
@@ -586,6 +756,26 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
           onCancel={() => setShowProcessModal(false)}
         />
       )}
-    </div>
+
+      {coachMarks.isActive && COACH_STEPS[coachMarks.activeStep] && (
+        <CoachMark
+          {...COACH_STEPS[coachMarks.activeStep]}
+          stepIndex={coachMarks.activeStep}
+          totalSteps={coachMarks.totalSteps}
+          screenKey="batchGrid"
+          onNext={coachMarks.next}
+          onDismiss={coachMarks.dismiss}
+          onDismissAll={() => { suppressAllWalkthroughs(); coachMarks.dismiss(); }}
+        />
+      )}
+
+      <ColorSpectrumPicker
+        open={barColorPickerOpen}
+        value={globalBlurSettings.barColor || '#000000'}
+        onChange={(hex) => setGlobalBlurSettings(prev => ({ ...prev, stickerEnabled: true, barColor: hex }))}
+        onClose={() => setBarColorPickerOpen(false)}
+        ariaLabel="Sticker color"
+      />
+    </>
   );
 }

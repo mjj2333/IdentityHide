@@ -8,9 +8,14 @@
  * To remove:   delete this file and remove the calls in
  *              MaskEditorScreen.jsx.
  */
+import { apiUrl } from './api';
 
 // ── Feature flag ──────────────────────────────────────────────
-export const CLICKADILLA_ENABLED = true;
+// Off for the initial Play Store submission to minimize ad-content review
+// risk (Google scans actual served ads, not just the SDK). AppLixir rewarded
+// video stays on. Re-enable once the app is approved and we have a better
+// sense of which Clickadilla inventory is reviewer-friendly.
+export const CLICKADILLA_ENABLED = false;
 
 // ── Ad pool state ────────────────────────────────────────────
 // Hybrid pool: up to MAX_PRELOAD_RETRIES attempts fire on editor mount, each
@@ -109,7 +114,7 @@ async function fetchOneAd(attempt, maxAttempts) {
   debugLog(`[ClickadillaAd] fetch attempt ${attempt}/${maxAttempts}`);
   let res;
   try {
-    res = await fetch('/.netlify/functions/vast-proxy', { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    res = await fetch(apiUrl('/.netlify/functions/vast-proxy'), { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   } catch (err) {
     debugLog(`[ClickadillaAd] fetch attempt ${attempt} failed:`, err?.name || err?.message || err);
     return null;

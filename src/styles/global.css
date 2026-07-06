@@ -1,4 +1,10 @@
-/* IdentityHide — Global Styles
+/* Redact.ID — Global Styles
+ *
+ * Design tokens below are the source of truth for the Redact.ID visual
+ * system. Older `--bg-surface` / `--text` / `--accent-rgb` variable names
+ * are preserved below as aliases so existing components keep rendering
+ * while the screens migrate to the canonical `--surface` / `--fg` / etc.
+ * names on their own schedule.
  *
  * Responsive breakpoints (use these consistently — do not invent new values):
  *   --bp-xs:  360px  — tiny phones (extra-tight overrides only)
@@ -10,36 +16,46 @@
  * are the source of truth — keep this comment in sync if any of them change.
  */
 :root {
-  --bg: #0a0a0a;
-  --bg-surface: #141414;
-  --bg-elevated: #1e1e1e;
-  --bg-hover: #2a2a2a;
-  --border: #2a2a2a;
-  --border-focus: #e8384f;
-  --text: #e8e8e8;
-  --text-dim: #999999;
-  --text-muted: #666666;
-  --text-heading: #ffffff;
-  --accent: #e8384f;
-  --accent-rgb: 232, 56, 79;
-  --accent-dim: rgba(232, 56, 79, 0.15);
-  --accent-hover: #d03045;
-  /* Foreground color for text/icons placed on top of an --accent fill.
-     Mirrors --on-danger. In dark mode --accent is bright enough that
-     black (5.2:1) beats white (4.1:1); the light theme overrides this
-     to white because the darker --accent used there fails WCAG AA with
-     black text (~3.7:1). */
-  --on-accent: #000000;
-  --danger: #ff4466;
-  /* Foreground color for text/icons placed on top of a --danger fill.
-     Keeps the pairing in one place so a future --danger tweak that
-     lands on a light red can flip this to a dark value without hunting
-     for hardcoded `#fff` / `white` across the stylesheet. */
-  --on-danger: #ffffff;
-  --warning: #ffaa00;
-  --radius-sm: 6px;
-  --radius: 10px;
-  --radius-lg: 16px;
+  /* ── Redact.ID canonical tokens (dark, default) ── */
+  --bg: #0d0c0a;
+  --surface: #151310;
+  --surface-elev: #1a1815;
+  --canvas: #0a0908;
+  --fg: #f5efe4;
+  --muted: rgba(245, 239, 228, 0.52);
+  --line: rgba(245, 239, 228, 0.10);
+  --line-strong: rgba(245, 239, 228, 0.25);
+  --accent: oklch(0.62 0.22 22);
+  --accent-fg: #ffffff;
+  --accent-tint: oklch(0.62 0.22 22 / 0.18);
+  --ok: oklch(0.74 0.14 150);
+  --warn: oklch(0.72 0.16 60);
+
+  /* ── Legacy aliases — old variable names pointing at the new tokens so
+     existing components keep working without a full rename pass. ── */
+  --bg-surface: var(--surface);
+  --bg-elevated: var(--surface-elev);
+  --bg-hover: var(--surface-elev);
+  --border: var(--line);
+  --border-focus: var(--accent);
+  --text: var(--fg);
+  --text-dim: var(--muted);
+  --text-muted: var(--muted);
+  --text-heading: var(--fg);
+  /* Approximate RGB of the crimson accent — kept for legacy `rgba(var(--accent-rgb), X)`
+     call sites. Prefer var(--accent-tint) or color-mix() in new code. */
+  --accent-rgb: 221, 56, 68;
+  --accent-dim: var(--accent-tint);
+  --accent-hover: oklch(0.55 0.22 22);
+  --on-accent: var(--accent-fg);
+  --danger: var(--accent);
+  --on-danger: var(--accent-fg);
+  --warning: var(--warn);
+
+  /* Redact.ID border radii: buttons 12, chips/pills 10, cards 14–18, full 999. */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
 
   /* Modal padding scale — keeps every overlay/modal visually consistent.
      Use --modal-pad-md for standard modals, --modal-pad-lg for hero overlays. */
@@ -48,11 +64,16 @@
   --modal-pad-lg: 32px;
 
   /* Button padding scale — every button class should pull from this. */
-  --btn-pad-sm: 6px 14px;
-  --btn-pad-md: 10px 20px;
-  --btn-pad-lg: 14px 28px;
-  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, 'SF Mono', Consolas, monospace;
+  --btn-pad-sm: 8px 14px;
+  --btn-pad-md: 12px 20px;
+  --btn-pad-lg: 16px 32px;
+
+  /* Typography — self-hosted variable fonts via @fontsource-variable.
+     Family names match what the packages register; fallbacks target
+     the original foundry name, then platform defaults. */
+  --serif: 'Fraunces Variable', 'Fraunces', Georgia, 'Times New Roman', serif;
+  --sans: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
 
   /* Transition duration scale.
      --dur-micro: slider thumb resize, very tight feedback
@@ -91,26 +112,25 @@
 }
 
 [data-theme="light"] {
-  --bg: #f5f5f5;
-  --bg-surface: #ffffff;
-  --bg-elevated: #f0f0f0;
-  --bg-hover: #e5e5e5;
-  --border: #d1d1d1;
-  --border-focus: #c42d40;
-  --text: #1c1c1e;
-  --text-dim: #5e5e6e;
-  --text-muted: #8e8e9e;
-  --text-heading: #000000;
-  --accent: #c42d40;
-  --accent-rgb: 196, 45, 64;
-  --accent-dim: rgba(196, 45, 64, 0.12);
-  --accent-hover: #a82538;
-  /* Light-theme --accent is darker, so black text (~3.7:1) fails WCAG AA.
-     Override to white (~5.6:1). See comment in :root. */
-  --on-accent: #ffffff;
-  --danger: #e5334d;
-  --on-danger: #ffffff;
-  --warning: #d4900a;
+  /* ── Redact.ID canonical tokens (light) ── */
+  --bg: #f6f3ec;
+  --surface: #fbf9f3;
+  --surface-elev: #ffffff;
+  --canvas: #e8e3d7;
+  --fg: #1c1a15;
+  --muted: rgba(28, 26, 21, 0.55);
+  --line: rgba(28, 26, 21, 0.12);
+  --line-strong: rgba(28, 26, 21, 0.32);
+  --accent: oklch(0.62 0.22 22);
+  --accent-fg: #ffffff;
+  --accent-tint: oklch(0.62 0.22 22 / 0.12);
+  --ok: oklch(0.55 0.14 150);
+  --warn: oklch(0.62 0.17 35);
+
+  /* Legacy aliases track the theme automatically because they reference
+     the canonical tokens above; no need to re-declare each one here.
+     The logo visibility flags still need flipping though. */
+  --accent-rgb: 221, 56, 68;
   --logo-dark-display: none;
   --logo-light-display: inline;
 }
@@ -154,6 +174,55 @@ textarea:focus-visible,
   display: flex;
   flex-direction: column;
   position: relative;
+}
+
+/* ── Redact.ID wordmark ──
+   The app name is always rendered with Fraunces small-caps so lowercase
+   "edact" matches the capital "R" in height. The ".ID" suffix lives inside
+   a span that:
+     (1) resets font-variant back to normal so "I" and "D" render full-cap
+         (otherwise they'd be small-cap size, which reads wrong),
+     (2) sits at 35% of the current text color opacity so the suffix softens
+         in both light and dark themes automatically.
+   Concrete sizes are set by the component that places the wordmark. */
+.wordmark {
+  display: inline-block;
+  font-family: var(--serif);
+  font-weight: 400;
+  font-variant: small-caps;
+  color: var(--fg);
+  line-height: 0.95;
+  letter-spacing: -0.6px;
+}
+
+.wordmark .id-suffix {
+  font-variant: normal;
+  font-variant-caps: normal;
+  text-transform: none;
+  opacity: 0.35;
+}
+
+.wordmark--hero {
+  font-size: 78px;
+  line-height: 0.95;
+  letter-spacing: -2px;
+}
+
+.wordmark--header {
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: -0.6px;
+}
+
+/* Mono caption used under the wordmark on editor/review/save headers
+   (e.g. "EDIT", "REVIEW", "SAVE"). */
+.step-caption {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 /* Skip-nav link — hidden until focused (WCAG 2.4.1).
@@ -249,6 +318,19 @@ textarea:focus-visible,
 
 .top-bar-side-right {
   justify-content: flex-end;
+}
+
+/* Count pill shown in the top-bar's right slot on screens that have no
+   primary action (Batch Protect, Batch Export). Mono small-caps so it reads
+   as a system label rather than competing with the wordmark. */
+.top-bar-count {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 4px 2px;
 }
 
 .top-back-btn {
@@ -349,13 +431,17 @@ textarea:focus-visible,
 .btn-primary {
   background: var(--accent);
   color: var(--on-accent);
-  border-color: var(--accent);
+  /* Border is transparent (not matching --accent) to avoid subpixel
+     anti-aliasing drawing the 1px .btn border as a slightly darker line
+     against the fill — an artifact most visible in light mode on high-DPI
+     displays. The 1px width is preserved so sizing matches other buttons. */
+  border-color: transparent;
   font-weight: 600;
 }
 
 .btn-primary:hover {
   background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  border-color: transparent;
 }
 
 /* Override the default focus ring: --border-focus resolves to the same value
@@ -409,8 +495,8 @@ textarea:focus-visible,
 }
 
 .btn-danger:hover {
-  background: #e03355;
-  border-color: #e03355;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 /* Confirm Modal */
@@ -449,10 +535,80 @@ textarea:focus-visible,
 }
 
 .confirm-title {
-  margin: 0 0 12px;
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--text-heading);
+  margin: 0 0 10px;
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.4px;
+  color: var(--fg);
+}
+
+/* ── Beta welcome popup ──
+   First-visit advertisement of the beta tester program. Slightly wider
+   than a standard confirm modal and vertically centered so the beaker
+   glyph + heading + copy + buttons + checkbox read as a single lockup. */
+.beta-welcome-modal {
+  max-width: 440px;
+  text-align: center;
+}
+
+.beta-welcome-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.beta-welcome-title {
+  text-align: center;
+}
+
+.beta-welcome-message {
+  text-align: center;
+  margin-bottom: 18px;
+}
+
+/* Inline code-entry form — wraps the input + action buttons so they
+   read as a single submit flow rather than a fan of options. */
+.beta-welcome-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.beta-welcome-form .signin-input {
+  text-align: center;
+  letter-spacing: 1.5px;
+}
+
+.beta-welcome-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.beta-welcome-actions .btn {
+  width: 100%;
+}
+
+.beta-welcome-dismiss {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  justify-content: center;
+}
+.beta-welcome-dismiss input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 /* ── Batch Process Modal ── */
@@ -505,6 +661,465 @@ textarea:focus-visible,
   font-size: 12px;
   color: var(--text-dim);
   margin: 0 0 16px;
+}
+
+/* ── Paywall + Sign-in modals ── */
+.paywall-modal {
+  max-width: 440px;
+}
+
+.paywall-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0 8px;
+}
+
+.paywall-error {
+  color: var(--danger, #d94848);
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.paywall-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+/* "Prefer to subscribe?" row — sits between the beta-code primary action
+   and the footer links. Deliberately small and plain so subscribe reads
+   as an alternative path during beta, not the recommended one. */
+.paywall-subscribe-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.paywall-subscribe-label {
+  letter-spacing: 0.2px;
+}
+.paywall-link-sep {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.paywall-link {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.paywall-link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.signin-modal {
+  max-width: 400px;
+}
+
+.signin-input {
+  width: 100%;
+  padding: 10px 12px;
+  margin: 8px 0 4px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  box-sizing: border-box;
+}
+
+.signin-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ── Redeem (beta code) modal ──
+   Shares most styles with .signin-modal; adds the two field labels and
+   an monospace code input treatment. */
+.redeem-modal {
+  max-width: 420px;
+}
+
+.redeem-field-label {
+  display: block;
+  margin-top: 10px;
+  margin-bottom: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.redeem-code-input {
+  font-family: var(--mono);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+/* ── Admin: beta codes panel ── */
+.beta-newcode-banner {
+  background: var(--accent-tint);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.beta-newcode-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--fg);
+  margin-bottom: 8px;
+}
+
+.beta-newcode-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.beta-newcode-code {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.beta-newcode-code code {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--surface-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 1px;
+  color: var(--fg);
+  user-select: all;
+}
+
+.beta-newcode-meta {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.beta-generate-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+
+/* Divider between "Generate code" and "Grant access directly" forms. */
+.beta-grant-divider {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+  margin: 4px 0 12px;
+}
+
+.beta-generate-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  flex: 1;
+}
+
+.beta-generate-field label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.beta-generate-field input {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 14px;
+}
+
+.beta-generate-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.beta-codes-list {
+  overflow-x: auto;
+}
+
+.beta-codes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.beta-codes-table th,
+.beta-codes-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 0.5px solid var(--line);
+}
+
+.beta-codes-table th {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.beta-codes-table tr.is-revoked {
+  opacity: 0.5;
+}
+
+.beta-codes-actions-head,
+.beta-codes-actions-cell {
+  text-align: right;
+  width: 100px;
+}
+
+.beta-codes-dim {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.beta-codes-state {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.beta-codes-state.is-active {
+  background: color-mix(in srgb, var(--ok) 20%, transparent);
+  color: var(--ok);
+}
+
+.beta-codes-state.is-inactive {
+  background: var(--surface-elev);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+/* Code cell — monospace + inline copy icon button */
+.beta-codes-code-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.beta-codes-code-value {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  color: var(--fg);
+  user-select: all;
+}
+
+.beta-codes-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+
+.beta-codes-copy-btn:hover {
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+
+.beta-codes-copy-btn.is-copied {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+/* Delete (trash) button — ghost styling, hover turns accent for affordance */
+.beta-codes-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color var(--dur-fast), background var(--dur-fast);
+}
+
+.beta-codes-delete-btn:hover {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+/* ── Account screen ── */
+.account-container {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+}
+
+.account-title {
+  font-family: var(--serif);
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: -0.8px;
+  color: var(--fg);
+  margin: 0 0 20px;
+}
+
+.account-section {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.account-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 20px;
+  margin: 0 0 20px;
+}
+
+.account-details dt {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.account-details dd {
+  margin: 0;
+  color: var(--text);
+}
+
+/* Beta-code credential shown in place of email for code-only users. Mono
+   so the user recognizes it as a credential, and word-break so long custom
+   codes don't push the layout. */
+.account-beta-code {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  word-break: break-all;
+}
+
+.account-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.account-status-active {
+  background: var(--success-bg, rgba(80, 200, 120, 0.15));
+  color: var(--success, #2e9f5a);
+}
+
+.account-status-inactive {
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.account-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Delete-account button: visually de-emphasized vs. Sign out (it's the
+   destructive option), with a danger-tinted text color so the user notices
+   it but isn't drawn to it. */
+.account-delete-btn {
+  color: #dc7b7b;
+  margin-top: 12px;
+  font-size: 13px;
+  opacity: 0.85;
+}
+.account-delete-btn:hover {
+  opacity: 1;
+}
+
+/* ── Batch upgrade gate ── */
+.batch-upgrade-gate {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 24px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.batch-upgrade-gate h3 {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-heading);
+  margin: 0 0 12px;
+}
+
+.batch-upgrade-gate p {
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin: 0 0 24px;
+}
+
+.batch-upgrade-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 320px;
 }
 
 /* ── Feedback Prompt ── */
@@ -1223,14 +1838,17 @@ textarea:focus-visible,
 .toolbar-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 /* Fixed toolbar height for mask editor so canvas never resizes.
-   Tallest state (blur/freehand): 3 tool rows + tabs. Bumped from 170/210 to
-   accommodate 44×44 touch targets without forcing the common states to scroll. */
+   Tallest state is the Freehand panel (title + style + slider + sliders + tools).
+   The height is slightly taller than the prior 190/235 clamp so the densest
+   panel fits without a scrollbar while the canvas still gets the lion's share
+   of the viewport. All modes share the same height so switching tabs never
+   shifts the canvas. */
 .mask-editor-toolbar {
-  --editor-toolbar-height: clamp(190px, 28vh, 235px);
+  --editor-toolbar-height: clamp(240px, 34vh, 300px);
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 4px;
@@ -1248,7 +1866,10 @@ textarea:focus-visible,
 
 .mask-editor-toolbar-panel {
   min-height: 100%;
-  justify-content: center;
+  /* justify-content stays default (flex-start) so every mode aligns top;
+     the panel title sits on the first line, controls stack under it, and
+     shorter panels leave empty space at the bottom instead of visually
+     jumping between centered and top-aligned layouts when switching tabs. */
 }
 
 .brush-size-row {
@@ -1468,57 +2089,123 @@ textarea:focus-visible,
   font-weight: 700;
 }
 
+/* ── Redact.ID sliders ──
+   Thin 2px line with a filled-portion and a 18×18 circular knob. The label
+   row above the track uses mono caps (LABEL left, VALUE right). The knob
+   itself is `--fg` with a 3px `--bg` inner ring and a 1px `--line-strong`
+   outer shadow, per the Redact.ID design spec. */
 .toolbar-slider {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   width: 100%;
   min-width: 0;
 }
 
 .toolbar-slider span {
-  font-size: 11px;
-  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
   line-height: 1.2;
+  /* When .toolbar-slider is laid out as a two-column row (label left,
+     slider right) the span lives at the baseline; when it's a column the
+     span stacks above. Either works — spacing is governed by the flex gap. */
 }
 
-.toolbar-slider input {
+.toolbar-slider input[type="range"],
+input[type="range"].export-quality-slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: linear-gradient(to right, var(--accent) var(--slider-pct, 50%), var(--border) var(--slider-pct, 50%));
+  height: 2px;
+  margin: 4px 0 0;
+  border-radius: 1px;
+  background: linear-gradient(to right, var(--fg) var(--slider-pct, 50%), var(--line) var(--slider-pct, 50%));
   outline: none;
   cursor: pointer;
 }
 
-.toolbar-slider input::-webkit-slider-thumb {
+.toolbar-slider input[type="range"]::-webkit-slider-thumb,
+input[type="range"].export-quality-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-surface);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  background: var(--fg);
+  border: 3px solid var(--bg);
+  box-shadow: 0 0 0 1px var(--line-strong);
   cursor: pointer;
 }
 
-.toolbar-slider input::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+.toolbar-slider input[type="range"]::-moz-range-thumb,
+input[type="range"].export-quality-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg-surface);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  background: var(--fg);
+  border: 3px solid var(--bg);
+  box-shadow: 0 0 0 1px var(--line-strong);
   cursor: pointer;
 }
 
-.toolbar-slider input::-moz-range-track {
-  height: 6px;
-  border-radius: 3px;
-  background: linear-gradient(to right, var(--accent) var(--slider-pct, 50%), var(--border) var(--slider-pct, 50%));
+.toolbar-slider input[type="range"]::-moz-range-track,
+input[type="range"].export-quality-slider::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(to right, var(--fg) var(--slider-pct, 50%), var(--line) var(--slider-pct, 50%));
+}
+
+/* ── Editor panel title ──
+   Sits above each mode's controls ("Auto Blur", "Shape Blur", "Freehand
+   Blur", "Tattoo Removal"). Per the Redact.ID spec: Fraunces 20px with
+   tight letter-spacing, left-aligned. Small bottom margin so the densest
+   panel (Freehand) fits without scrolling on a phone viewport. */
+.mode-panel-title {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
+  color: var(--fg);
+  margin: 0 0 4px;
+  line-height: 1.1;
+}
+
+/* ── Segmented blur-style row (Gaussian / Pixelate / Black bar) ──
+   Replaces the older dropdown inside the Auto Blur / Shape / Freehand panels.
+   Three equal-width buttons; selected fills with `--fg`, text flips to `--bg`. */
+.blur-style-row {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.blur-style-btn {
+  flex: 1;
+  padding: 10px 0;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.1px;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+
+.blur-style-btn:hover {
+  border-color: var(--line-strong);
+}
+
+.blur-style-btn.is-selected {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
 }
 
 /* ── Brush Size Strip (below canvas) ── */
@@ -1678,9 +2365,42 @@ textarea:focus-visible,
   opacity: 1;
 }
 
-/* Rectangle face overlay */
-.face-overlay.rectangle {
-  border-radius: 4px;
+/* Sticker object overlay — rectangular box, a distinct cyan accent so a
+   sticker reads differently from a blur oval at a glance. */
+.face-overlay.sticker-overlay {
+  border-radius: 6px;
+  border-color: rgba(90, 200, 250, 0.7);
+}
+.face-overlay.sticker-overlay:hover {
+  border-color: rgba(90, 200, 250, 0.95);
+  background: rgba(90, 200, 250, 0.08);
+}
+.face-overlay.sticker-overlay.selected {
+  border-color: #5ac8fa;
+  background: rgba(90, 200, 250, 0.12);
+}
+
+/* Disabled face overlay — user toggled this face off in the batch grid so
+   the batch processor should skip it. Dimmed with a dashed grey border so
+   the user can still see it's there and re-enable if needed. */
+.face-overlay.face-overlay-disabled {
+  border-color: rgba(128, 128, 128, 0.4);
+  border-style: dashed;
+  opacity: 0.5;
+}
+
+.face-overlay-disabled-badge {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  font-weight: 700;
+  color: #888;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 1px 5px;
+  border-radius: 3px;
+  pointer-events: none;
 }
 
 .oval-resize-row {
@@ -1815,6 +2535,238 @@ textarea:focus-visible,
   flex-wrap: wrap;
 }
 
+/* Bar style dropdown — the third "Black Bar" segment of the blur-style row
+   doubles as the style picker. The wrapper participates in the parent flex
+   layout exactly like the two other segmented buttons (flex: 1, equal
+   width); the trigger button fills the wrapper. Label truncates with an
+   ellipsis if the active style name (e.g. "Highlighter") is too long to
+   fit alongside the chevron — the toolbar width never grows because of
+   the dropdown. */
+.bar-style-menu-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.bar-style-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+.bar-style-trigger > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.bar-style-trigger svg {
+  opacity: 0.7;
+  flex: 0 0 auto;
+}
+.bar-style-trigger-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4) inset;
+  flex: 0 0 auto;
+}
+/* Ensure the existing Gaussian / Pixelate segments don't shrink past their
+   labels when the third button has a long active-style name. min-width: 0
+   gives flex permission to redistribute uniformly via the flex:1 share. */
+.blur-style-btn {
+  min-width: 0;
+}
+.bar-style-menu {
+  /* Rendered via React portal to document.body so an ancestor with
+     overflow: hidden (the mask-editor toolbar) can't clip it. The trigger
+     supplies `left` and `bottom` inline based on its bounding rect, so the
+     menu opens upward — toolbar sits at the bottom of the editor. */
+  position: fixed;
+  min-width: 140px;
+  background: var(--bg-elevated, #1c1c1c);
+  border: 1px solid var(--border, rgba(255,255,255,0.15));
+  border-radius: 8px;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  z-index: 180;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bar-style-menu-item {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-dim, #aaa);
+  font-size: 13px;
+  text-align: left;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bar-style-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text, #fff);
+}
+.bar-style-menu-item.is-active {
+  background: var(--accent, #e8384f);
+  color: #fff;
+}
+
+/* Bar style menu — Color entry */
+.bar-style-menu-divider {
+  height: 1px;
+  background: var(--border, rgba(255, 255, 255, 0.1));
+  margin: 4px 0;
+}
+.bar-style-menu-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.bar-style-menu-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4) inset;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+/* "Turn off stickers" — secondary destructive-ish action at the bottom. */
+.bar-style-menu-off {
+  color: var(--text-dim, #aaa);
+  font-size: 12px;
+}
+
+/* Color spectrum picker — centered modal. Fixed-position dialog with
+   a click-to-dismiss backdrop. Sized to fit the viewport even on small
+   phones via max-width/max-height with internal scrolling fallback. */
+.color-spectrum-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 16px;
+  box-sizing: border-box;
+  /* Avoid the iOS keyboard pushing the modal off-center if the hex input
+     is focused — the dialog itself handles its own scroll if it's bigger
+     than the available space. */
+  overscroll-behavior: contain;
+}
+.color-spectrum-dialog {
+  background: var(--bg-elevated, #1c1c1c);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  padding: 14px;
+  width: min(320px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.color-spectrum-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.color-spectrum-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text, #fff);
+  flex: 1;
+}
+.color-spectrum-current {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4) inset;
+  flex: 0 0 auto;
+}
+.color-spectrum-close {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-dim, #aaa);
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.color-spectrum-close:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text, #fff);
+}
+.color-spectrum-canvas {
+  display: block;
+  width: 100%;
+  /* Maintain aspect ratio matching the canvas drawing buffer (280×170).
+     Letting CSS width go to 100% means the spectrum fills the dialog
+     even on narrow phones; height auto-scales to keep proportions. */
+  aspect-ratio: 280 / 170;
+  height: auto;
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.color-spectrum-presets {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.color-spectrum-preset {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4) inset;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s ease;
+}
+.color-spectrum-preset:hover {
+  transform: scale(1.1);
+}
+.color-spectrum-preset.is-active {
+  outline: 2px solid var(--accent, #e8384f);
+  outline-offset: 2px;
+}
+.color-spectrum-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+.color-spectrum-done {
+  appearance: none;
+  background: var(--accent, #e8384f);
+  border: none;
+  color: #fff;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.color-spectrum-done:hover {
+  filter: brightness(1.05);
+}
+
 .mask-editor-canvas-container {
   flex: 1;
   min-height: 0;
@@ -1858,6 +2810,17 @@ textarea:focus-visible,
   justify-content: center;
   touch-action: none;
   will-change: transform;
+}
+
+/* Frame that wraps the canvas tightly so the compare button (absolute-
+   positioned inside) anchors to the real image bounds. Sized to the
+   canvas's natural pixel dimensions — `display: inline-block` means the
+   frame is exactly as big as its inner canvas. The zoom hook then
+   scales the whole frame (canvas + button) to fit the wrapper, which
+   matches how ReviewScreen's canvas container behaves. */
+.export-canvas-frame {
+  position: relative;
+  display: inline-block;
 }
 
 .export-canvas-full {
@@ -1941,7 +2904,7 @@ textarea:focus-visible,
   border-color: var(--accent);
 }
 
-/* ── Review Touch Up Button ── */
+/* ── Review: Touch-Up button ── */
 .review-touch-up-area {
   display: flex;
   justify-content: center;
@@ -1952,28 +2915,233 @@ textarea:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 28px;
+  padding: 12px 20px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-elev);
+  color: var(--fg);
+  font-family: var(--sans);
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: -0.1px;
+  cursor: pointer;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
 }
 
-/* ── Export Actions (below canvas) ── */
-.export-toolbar-group {
+.review-touch-up-btn:hover {
+  border-color: var(--line-strong);
+}
+
+/* ── Review: Metadata report card (accordion) ──
+   Collapsed by default so the before/after compare view fills the screen.
+   Tap the header to expand a dashed-divider list of which fields were
+   stripped. Summary pill on the right ("N removed") and a chevron indicate
+   expand state. */
+.metadata-report {
+  margin: 6px 20px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.metadata-report-header {
+  /* Reset native button */
+  width: 100%;
+  font: inherit;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  transition: background var(--dur-fast);
+}
+
+.metadata-report-header:hover {
+  background: var(--surface-elev);
+}
+
+.metadata-report-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.metadata-report-title {
+  flex: 1;
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
+  color: var(--fg);
+  margin: 0;
+}
+
+.metadata-report-summary {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  color: var(--muted);
+}
+
+.metadata-report-chev {
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform var(--dur-fast);
+}
+
+.metadata-report-rows {
   display: flex;
   flex-direction: column;
+  padding: 0 16px 12px;
+  border-top: 0.5px solid var(--line);
+}
+
+.metadata-report-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 0.5px dashed var(--line);
+}
+
+.metadata-report-row:first-child { border-top: none; }
+
+.metadata-report-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg);
+  letter-spacing: 0.2px;
+}
+
+.metadata-report-status {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+}
+
+.metadata-report-status.is-removed { color: var(--ok); }
+
+/* ── Redact.ID · Export toolbar ──
+   Stacked layout (format → quality → save) centered inside the bottom-
+   toolbar region. Replaces the older grid-style action row. */
+.export-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 14px 20px 6px;
+}
+
+.export-format-label,
+.export-quality-label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.export-format-buttons {
+  display: flex;
   gap: 6px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
+}
+
+.export-format-btn {
+  flex: 1;
+  padding: 12px 0;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
+}
+
+.export-format-btn:hover { border-color: var(--line-strong); }
+
+.export-format-btn.is-active {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+
+.export-quality-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.export-quality-label {
+  margin: 0;
+  letter-spacing: 1.2px;
+}
+
+.export-quality-value {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg);
+}
+
+.export-quality-slider {
+  width: 100%;
+  margin: 0;
+}
+
+.export-file-info {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .export-error-msg {
-  color: #ff6b6b;
+  color: var(--accent);
   font-size: 13px;
+  text-align: center;
 }
 
-.export-action-row {
-  gap: 10px;
+.export-primary-row {
+  display: flex;
   justify-content: center;
+  padding-top: 6px;
+}
+
+.export-save-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 240px;
+  padding: 16px 32px;
+  border-radius: 12px;
+  border: none;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: var(--sans);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  cursor: pointer;
+  transition: opacity var(--dur-fast);
+}
+
+.export-save-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 /* Floating compare toggle, anchored to the bottom-right of the image
@@ -1988,7 +3156,7 @@ textarea:focus-visible,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  padding: 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
@@ -2115,20 +3283,21 @@ textarea:focus-visible,
 
 .compare-tag {
   position: absolute;
-  top: 12px;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  padding: 6px 12px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.75);
+  top: 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   color: white;
   pointer-events: none;
   z-index: var(--z-compare-tag);
   user-select: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   /* Entrance animation draws the eye on first load so users notice the
      labels and realize the divider is draggable. Auto-disabled by the
      global prefers-reduced-motion handler. */
@@ -2180,16 +3349,17 @@ textarea:focus-visible,
 }
 
 /* ── Chrome toggles (theme / tips) ── */
+/* Legacy tips toggle — kept as a chrome pill (not the segmented pill). */
 .chrome-toggle {
   position: fixed;
-  top: 8px;
+  top: calc(12px + var(--safe-area-top));
   z-index: var(--z-chrome);
   width: 36px;
   height: 36px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2200,18 +3370,49 @@ textarea:focus-visible,
   transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast);
 }
 
-.chrome-toggle--theme {
-  right: 8px;
-}
-
 .chrome-toggle--tips {
-  left: 8px;
+  left: calc(12px + var(--safe-area-left));
 }
 
 .chrome-toggle--tips.active {
   border-color: var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
+}
+
+/* Theme pill — two-segment sun/moon toggle rendered in the wordmark row
+   on Home and top-right of the chrome-bearing standalone routes. */
+.theme-pill {
+  position: fixed;
+  top: calc(12px + var(--safe-area-top));
+  right: calc(12px + var(--safe-area-right));
+  z-index: var(--z-chrome);
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.theme-pill__seg {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+
+.theme-pill__seg.is-active {
+  background: var(--fg);
+  color: var(--bg);
 }
 
 /* ── Mobile Responsive ── */
@@ -2381,6 +3582,52 @@ textarea:focus-visible,
   animation: pulse 1.5s ease infinite;
 }
 
+/* Rotating "Did you know" card shown during processing. Used in two
+   contexts: inside the dark .apply-overlay scrim (single-image premium
+   flow) AND on the normal app surface (batch processing footer). Uses
+   theme-adaptive tokens so it reads in both dark and light modes.
+   Inside the apply-overlay, .apply-overlay .apply-tip overrides below
+   force the on-dark-scrim treatment. */
+.apply-tip {
+  max-width: 360px;
+  margin-top: 4px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.apply-tip-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.apply-tip-body {
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg);
+  margin: 0;
+}
+
+/* Overlay variant — the .apply-overlay backdrop is hardcoded dark in both
+   themes (so progress text stays legible), so the tip card needs light
+   treatment regardless of the user's theme preference. */
+.apply-overlay .apply-tip {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.apply-overlay .apply-tip-body {
+  color: #fff;
+}
+
 .apply-overlay .btn {
   flex-shrink: 0;
 }
@@ -2483,12 +3730,33 @@ textarea:focus-visible,
   border-style: dashed;
 }
 
-/* === Admin Dashboard === */
+/* === Admin Dashboard ===
+   Now lives inside ScreenShell, so the top bar and back button come from
+   the shared shell (matches every other screen). The .admin-dashboard
+   wrapper provides the scrollable body — flex parent (.screen-content)
+   has overflow:hidden, so this child is what actually scrolls. Sides +
+   bottom pad with safe-area so landscape iPhones and gesture-bar models
+   don't clip content. */
 .admin-dashboard {
-  max-width: 640px;
+  width: 100%;
+  height: 100%;
+  max-width: 720px;
   margin: 0 auto;
-  padding: 20px 20px;
+  padding:
+    16px
+    calc(20px + var(--safe-area-right))
+    calc(16px + var(--safe-area-bottom))
+    calc(20px + var(--safe-area-left));
   color: var(--text);
+  overflow-y: auto;
+}
+
+/* Inline toolbar at the top of admin content — currently just hosts the
+   Refresh button (Back is handled by ScreenShell's left-chevron). */
+.admin-content-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 .admin-login {
   max-width: 300px;
@@ -2518,22 +3786,12 @@ textarea:focus-visible,
   margin-top: 10px;
   font-size: 0.85rem;
 }
-.admin-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-  padding-right: 44px; /* avoid theme toggle overlap */
-}
-.admin-header h2 {
-  margin: 0;
-  font-size: 1.1rem;
-  color: var(--text);
-}
-.admin-header-actions {
-  display: flex;
-  gap: 8px;
-}
+/* .admin-header / .admin-header h2 / .admin-header-actions rules removed
+   — the admin top bar is now rendered by ScreenShell. The custom
+   .admin-header div was the parent of the page-local Back/Refresh
+   buttons; Back has moved to ScreenShell's left chevron and Refresh
+   sits inline in .admin-content-toolbar. */
+
 .btn-sm {
   padding: 4px 10px;
   font-size: 0.75rem;
@@ -2921,9 +4179,11 @@ textarea:focus-visible,
 }
 
 .terms-title {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--text);
+  font-family: var(--serif);
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: -0.8px;
+  color: var(--fg);
   margin: 0 0 4px;
   text-align: center;
 }
@@ -2950,9 +4210,11 @@ textarea:focus-visible,
 }
 
 .terms-section h2 {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text);
+  font-family: var(--serif);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: -0.2px;
+  color: var(--fg);
   margin: 0 0 6px;
 }
 
@@ -2993,9 +4255,11 @@ textarea:focus-visible,
 }
 
 .faq-title {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--text);
+  font-family: var(--serif);
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: -0.8px;
+  color: var(--fg);
   margin: 0 0 16px;
   text-align: center;
 }
@@ -3074,9 +4338,11 @@ textarea:focus-visible,
 }
 
 .feedback-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text);
+  font-family: var(--serif);
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  color: var(--fg);
   margin: 0;
   text-align: center;
 }
@@ -3397,7 +4663,7 @@ textarea:focus-visible,
   font-size: 14px;
   animation: app-toast-in 200ms ease;
 }
-.app-toast-sticky { border-color: #e74c3c; }
+.app-toast-sticky { border-color: var(--accent); }
 .app-toast-body { flex: 1; line-height: 1.4; }
 .app-toast-close {
   background: transparent;

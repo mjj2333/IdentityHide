@@ -36,6 +36,17 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom'],
   },
+  server: {
+    // Capacitor's `cap copy` writes the built web bundle into the native
+    // shells under ios/App/App/public and android/app/src/main/assets/public.
+    // Vite's file watcher mirrors source files, so it tries to watch those
+    // sync targets too — and crashes on Windows ("scandir UNKNOWN") when the
+    // sync rewrites the directory mid-scan. Excluding them from the watcher
+    // keeps the dev server stable while still letting `cap copy` do its job.
+    watch: {
+      ignored: ['**/ios/**', '**/android/**'],
+    },
+  },
   // Strip development-only console calls from production bundles. console.warn
   // and console.error are preserved so genuine problems still reach Sentry /
   // the browser devtools in the wild. esbuild treats `pure` calls as

@@ -1,7 +1,9 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useBatch } from '../context/BatchContext';
 import { useZoomPan } from '../hooks/useZoomPan';
-import { applyMaskedBlur, stackBlur, BLUR_MODE_LABELS, FACE_BOX_EXPAND } from '../utils/blurEngine';
+import { applyMaskedBlur, stackBlur, BLUR_MODE_LABELS, FACE_BOX_EXPAND, BAR_STYLES, migrateBlurSettings } from '../utils/blurEngine';
+import ColorSpectrumPicker from './ColorSpectrumPicker';
 import { buildFaceMask, createThumbnail, canvasToBlobUrl } from '../utils/batchProcessor';
 import ScreenShell from './ScreenShell';
 import ConfirmModal from './ConfirmModal';
@@ -49,12 +51,14 @@ export default function BatchEditorScreen({ onBack }) {
   // Local editing state
   const [editDets, setEditDets] = useState([]);
   const [localMode, setLocalMode] = useState('gaussian');
+  const [localStickerEnabled, setLocalStickerEnabled] = useState(false);
   const [localStrength, setLocalStrength] = useState(20);
   const [localFeather, setLocalFeather] = useState(0);
   const [localBarWidth, setLocalBarWidth] = useState(20);
   const [localBarLength, setLocalBarLength] = useState(110);
   const [localBarAngle, setLocalBarAngle] = useState(0);
-  const [shapeType, setShapeType] = useState('oval');
+  const [localBarStyle, setLocalBarStyle] = useState('solid');
+  const [localBarColor, setLocalBarColor] = useState('#000000');
   const [selectedIdx, setSelectedIdx] = useState(null);
   const [renderKey, setRenderKey] = useState(0);
 
@@ -68,7 +72,7 @@ export default function BatchEditorScreen({ onBack }) {
   useEffect(() => {
     if (!mountedRef.current) { mountedRef.current = true; return; }
     batchDirtyRef.current = true;
-  }, [batchDirtyRef, editDets, localMode, localStrength, localFeather, localBarWidth, localBarLength, localBarAngle]);
+  }, [batchDirtyRef, editDets, localMode, localStickerEnabled, localStrength, localFeather, localBarWidth, localBarLength, localBarAngle, localBarStyle, localBarColor]);
   useEffect(() => () => { batchDirtyRef.current = false; }, [batchDirtyRef]);
   // Release the final blur-preview canvas on unmount so navigating away
   // doesn't leave a full-res bitmap pinned until the next GC pass.
@@ -93,22 +97,34 @@ export default function BatchEditorScreen({ onBack }) {
   const [blurDropdownPos, setBlurDropdownPos] = useState(null);
   const blurDropdownRef = useRef(null);
   const blurTriggerRef = useRef(null);
+  const [barStyleMenuOpen, setBarStyleMenuOpen] = useState(false);
+  const [barColorPickerOpen, setBarColorPickerOpen] = useState(false);
+  const [barStyleMenuPos, setBarStyleMenuPos] = useState(null);
+  const barStyleMenuRef = useRef(null);
+  const barStyleTriggerRef = useRef(null);
+  const barStyleMenuElRef = useRef(null);
 
   // Keep refs in sync for rAF callbacks
   const editDetsRef = useRef(editDets);
   const localModeRef = useRef(localMode);
+  const localStickerEnabledRef = useRef(localStickerEnabled);
   const localStrengthRef = useRef(localStrength);
   const localFeatherRef = useRef(localFeather);
   const localBarWidthRef = useRef(localBarWidth);
   const localBarLengthRef = useRef(localBarLength);
   const localBarAngleRef = useRef(localBarAngle);
+  const localBarStyleRef = useRef(localBarStyle);
+  const localBarColorRef = useRef(localBarColor);
   useEffect(() => { editDetsRef.current = editDets; }, [editDets]);
   useEffect(() => { localModeRef.current = localMode; }, [localMode]);
+  useEffect(() => { localStickerEnabledRef.current = localStickerEnabled; }, [localStickerEnabled]);
   useEffect(() => { localStrengthRef.current = localStrength; }, [localStrength]);
   useEffect(() => { localFeatherRef.current = localFeather; }, [localFeather]);
   useEffect(() => { localBarWidthRef.current = localBarWidth; }, [localBarWidth]);
   useEffect(() => { localBarLengthRef.current = localBarLength; }, [localBarLength]);
   useEffect(() => { localBarAngleRef.current = localBarAngle; }, [localBarAngle]);
+  useEffect(() => { localBarStyleRef.current = localBarStyle; }, [localBarStyle]);
+  useEffect(() => { localBarColorRef.current = localBarColor; }, [localBarColor]);
   useEffect(() => { faceBlurToolRef.current = faceBlurTool; }, [faceBlurTool]);
   useEffect(() => { faceBlurBrushSizeRef.current = faceBlurBrushSize; }, [faceBlurBrushSize]);
   useEffect(() => () => clearTimeout(touchDelayRef.current), []);
@@ -117,7 +133,7 @@ export default function BatchEditorScreen({ onBack }) {
 
   // Close popovers on outside click
   useEffect(() => {
-    if (!blurDropdownOpen && !blurPickerOpen) return;
+    if (!blurDropdownOpen && !blurPickerOpen && !barStyleMenuOpen) return;
     const onClick = (e) => {
       if (blurDropdownOpen && blurDropdownRef.current && !blurDropdownRef.current.contains(e.target)) {
         setBlurDropdownOpen(false);
@@ -125,10 +141,15 @@ export default function BatchEditorScreen({ onBack }) {
       if (blurPickerOpen && blurTabRef.current && !blurTabRef.current.contains(e.target)) {
         setBlurPickerOpen(false);
       }
+      if (barStyleMenuOpen
+          && barStyleMenuRef.current && !barStyleMenuRef.current.contains(e.target)
+          && (!barStyleMenuElRef.current || !barStyleMenuElRef.current.contains(e.target))) {
+        setBarStyleMenuOpen(false);
+      }
     };
     document.addEventListener('pointerdown', onClick);
     return () => document.removeEventListener('pointerdown', onClick);
-  }, [blurDropdownOpen, blurPickerOpen]);
+  }, [blurDropdownOpen, blurPickerOpen, barStyleMenuOpen]);
 
   // Initialize local state from batch entry
   useEffect(() => {
@@ -136,17 +157,21 @@ export default function BatchEditorScreen({ onBack }) {
     const dets = imageEntry.editDetections || imageEntry.detections || [];
     setEditDets(dets.map(d => ({
       ...d,
+      kind: d.kind || 'blur',
       enabled: d.enabled !== false,
       origHw: d.origHw || (d.bottomRight[0] - d.topLeft[0]) / 2,
       origHh: d.origHh || (d.bottomRight[1] - d.topLeft[1]) / 2,
     })));
-    const settings = imageEntry.blurSettings || globalBlurSettings;
+    const settings = migrateBlurSettings(imageEntry.blurSettings || globalBlurSettings);
     setLocalMode(settings.mode);
+    setLocalStickerEnabled(!!settings.stickerEnabled);
     setLocalStrength(settings.strength);
     setLocalFeather(imageEntry.localFeather ?? globalFeather);
     setLocalBarWidth(settings.barWidth ?? globalBlurSettings.barWidth ?? 20);
     setLocalBarLength(settings.barLength ?? globalBlurSettings.barLength ?? 110);
     setLocalBarAngle(settings.barAngle ?? globalBlurSettings.barAngle ?? 0);
+    setLocalBarStyle(settings.barStyle ?? globalBlurSettings.barStyle ?? 'solid');
+    setLocalBarColor(settings.barColor ?? globalBlurSettings.barColor ?? '#000000');
     setSelectedIdx(null);
 
     // Initialize faceBlurCanvas
@@ -188,6 +213,13 @@ export default function BatchEditorScreen({ onBack }) {
     if (selectedIdx !== null && selectedIdx >= editDets.length) setSelectedIdx(null);
   }, [editDets.length, selectedIdx]);
 
+  // Auto/Shape always need a real blur type; Freehand "Colors" sets 'none'.
+  useEffect(() => {
+    if ((blurSubMode === 'autoface' || blurSubMode === 'shape') && localMode === 'none') {
+      setLocalMode('gaussian');
+    }
+  }, [blurSubMode, localMode]);
+
   // Build blur preview (combines detection shapes + freehand canvas)
   const buildPreviewMask = useCallback((dets, mode) => {
     if (!src) return null;
@@ -199,22 +231,15 @@ export default function BatchEditorScreen({ onBack }) {
 
     if (mode !== 'blackbar') {
       for (const det of dets) {
+        if (det.kind === 'sticker') continue; // stickers aren't blur regions
         ctx.fillStyle = 'white';
-        if (det.shape === 'rectangle') {
-          const w = (det.bottomRight[0] - det.topLeft[0]) * FACE_BOX_EXPAND;
-          const h = (det.bottomRight[1] - det.topLeft[1]) * FACE_BOX_EXPAND;
-          const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-          const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-          ctx.fillRect(cx - w/2, cy - h/2, w, h);
-        } else {
-          const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-          const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-          const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
-          const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
-          ctx.beginPath();
-          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
+        const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
+        const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
+        const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
 
@@ -244,29 +269,35 @@ export default function BatchEditorScreen({ onBack }) {
     if (!src) return;
     const dets = editDetsRef.current.filter(d => d.enabled);
     const mode = localModeRef.current;
+    const stickerEnabled = !!localStickerEnabledRef.current; // freehand color flag
     const strength = localStrengthRef.current;
-    const mask = buildPreviewMask(dets, mode);
-    if (!mask) return;
+    const wantBlur = mode === 'gaussian' || mode === 'pixelate';
 
-    const mCtx = mask.getContext('2d');
-    const mData = mCtx.getImageData(0, 0, mask.width, mask.height);
-    let hasMask = false;
-    for (let i = 0; i < mData.data.length; i += 4) {
-      if (mData.data[i + 3] > 0) { hasMask = true; break; }
-    }
+    const blurDets = dets.filter(d => d.kind !== 'sticker');
+    const stickerObjects = dets.filter(d => d.kind === 'sticker');
 
-    // Free the previous preview's bitmap before replacing it. Without this
-    // zero-out the old canvas keeps its ImageData pinned until GC, and
-    // slider scrubbing at 60 fps can stack dozens of full-res canvases in
-    // memory (~16 MB each at 4 MP).
+    const blurMask = wantBlur ? buildPreviewMask(blurDets, 'gaussian') : null;
+    const freehandStickerMask = stickerEnabled ? buildPreviewMask([], 'blackbar') : null;
+
+    const hasPixels = (m) => {
+      const d = m.getContext('2d').getImageData(0, 0, m.width, m.height).data;
+      for (let i = 3; i < d.length; i += 4) { if (d[i] > 0) return true; }
+      return false;
+    };
+    const hasBlur = !!blurMask && hasPixels(blurMask);
+    const hasSticker = stickerObjects.length > 0 || (!!freehandStickerMask && hasPixels(freehandStickerMask));
+
+    // Free the previous preview's bitmap before replacing it.
     const prev = blurPreviewRef.current;
     if (prev) { prev.width = 0; prev.height = 0; }
 
-    if (!hasMask && !(mode === 'blackbar' && dets.length > 0)) {
+    if (!hasBlur && !hasSticker) {
       blurPreviewRef.current = null;
     } else {
-      const barSettings = mode === 'blackbar' ? { width: localBarWidthRef.current, length: localBarLengthRef.current, angle: localBarAngleRef.current } : null;
-      blurPreviewRef.current = applyMaskedBlur(src, mask, mode, strength, dets, barSettings);
+      blurPreviewRef.current = applyMaskedBlur(
+        src, blurMask, wantBlur ? mode : 'none', strength,
+        stickerObjects, freehandStickerMask, localBarColorRef.current || '#000000',
+      );
     }
   }, [src, buildPreviewMask]);
 
@@ -279,20 +310,29 @@ export default function BatchEditorScreen({ onBack }) {
     });
   }, [updateBlurPreview, forceRender]);
 
-  useEffect(() => { scheduleBlurPreview(); }, [editDets, localMode, localStrength, localFeather, localBarWidth, localBarLength, localBarAngle]);
+  useEffect(() => { scheduleBlurPreview(); }, [editDets, localMode, localStickerEnabled, localStrength, localFeather, localBarWidth, localBarLength, localBarAngle, localBarStyle, localBarColor]);
 
   // Render display canvas
   const renderDisplay = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !src) return;
-    canvas.width = imgW;
-    canvas.height = imgH;
+    // Only resize when dimensions actually change — assigning canvas.width/height
+    // reallocates + zero-fills the whole backing store (~48 MB at 12 MP) and was
+    // a primary cause of paint lag on large images. The image is fully repainted
+    // below, so skipping the reset leaves no stale pixels.
+    if (canvas.width !== imgW || canvas.height !== imgH) {
+      canvas.width = imgW;
+      canvas.height = imgH;
+    }
     const ctx = canvas.getContext('2d');
 
-    // Base layer: on the Tattoo tab we show the raw source so the user sees
-    // exactly what the mask covers. On the Blur tab we show the blur preview
-    // (or the raw source when there's nothing to blur yet).
-    if (topMode === 'blur' && blurPreviewRef.current) {
+    // Base layer: the blur preview when one's been computed, otherwise the
+    // raw source. Shown regardless of which tab is active — if the user has
+    // auto-detected a face and then switched to the Tattoo tab, dropping the
+    // blur looks like their work was lost (the underlying state is still
+    // there; this is a display-only concern). The tattoo mask tint overlays
+    // on top, so both pieces of their work stay visible at once.
+    if (blurPreviewRef.current) {
       ctx.drawImage(blurPreviewRef.current, 0, 0);
     } else {
       ctx.drawImage(src, 0, 0);
@@ -305,9 +345,13 @@ export default function BatchEditorScreen({ onBack }) {
     const maskSrc = tattooMaskCanvasRef.current;
     if (maskSrc) {
       const tinted = tintedMaskRef.current || document.createElement('canvas');
-      tinted.width = imgW;
-      tinted.height = imgH;
       tintedMaskRef.current = tinted;
+      // Only reallocate the tint buffer on a real size change; clearRect below
+      // handles per-frame clearing.
+      if (tinted.width !== imgW || tinted.height !== imgH) {
+        tinted.width = imgW;
+        tinted.height = imgH;
+      }
       const tCtx = tinted.getContext('2d');
       tCtx.clearRect(0, 0, imgW, imgH);
       tCtx.drawImage(maskSrc, 0, 0);
@@ -320,7 +364,7 @@ export default function BatchEditorScreen({ onBack }) {
       ctx.drawImage(tinted, 0, 0);
       ctx.restore();
     }
-  }, [src, imgW, imgH, topMode]);
+  }, [src, imgW, imgH]);
 
   useEffect(() => {
     if (drawRafRef.current != null) return;
@@ -415,23 +459,46 @@ export default function BatchEditorScreen({ onBack }) {
     setSelectedIdx(null);
   }, []);
 
-  // Add region (shape mode)
-  const handleAddRegion = useCallback(() => {
+  // Add a blur object (oval)
+  const handleAddBlur = useCallback(() => {
     const hw = imgW * 0.075;
-    const hh = shapeType === 'oval' ? hw * 1.3 : hw;
+    const hh = hw * 1.3;
     const cx = imgW / 2;
     const cy = imgH / 2;
     setEditDets(prev => [...prev, {
+      kind: 'blur',
       topLeft: [cx - hw, cy - hh],
       bottomRight: [cx + hw, cy + hh],
       origHw: hw,
       origHh: hh,
       enabled: true,
       type: 'manual',
-      shape: shapeType,
     }]);
     setSelectedIdx(editDetsRef.current.length);
-  }, [imgW, imgH, shapeType]);
+  }, [imgW, imgH]);
+
+  // Add a sticker object (independent; defaults from current local settings)
+  const handleAddSticker = useCallback(() => {
+    const hw = imgW * 0.12;
+    const hh = imgW * 0.035;
+    const cx = imgW / 2;
+    const cy = imgH / 2;
+    setEditDets(prev => [...prev, {
+      kind: 'sticker',
+      topLeft: [cx - hw, cy - hh],
+      bottomRight: [cx + hw, cy + hh],
+      origHw: hw,
+      origHh: hh,
+      enabled: true,
+      type: 'manual',
+      barStyle: localBarStyleRef.current || 'solid',
+      barColor: localBarColorRef.current || '#000000',
+      barWidth: 100,
+      barLength: 100,
+      barAngle: 0,
+    }]);
+    setSelectedIdx(editDetsRef.current.length);
+  }, [imgW, imgH]);
 
   // Clear all faces
   const handleClearFaces = useCallback(() => {
@@ -584,19 +651,26 @@ export default function BatchEditorScreen({ onBack }) {
     if (!imageEntry || !src) { onBack(); return; }
 
     const enabledDets = editDets.filter(d => d.enabled);
-    const mask = buildPreviewMask(enabledDets, localMode);
+    const blurDets = enabledDets.filter(d => d.kind !== 'sticker');
+    const stickerObjects = enabledDets.filter(d => d.kind === 'sticker');
+    const wantBlur = localMode === 'gaussian' || localMode === 'pixelate';
+    const blurMask = wantBlur ? buildPreviewMask(blurDets, 'gaussian') : null;
+    const freehandStickerMask = localStickerEnabled ? buildPreviewMask([], 'blackbar') : null;
+
+    const hasPixels = (m) => {
+      const d = m.getContext('2d').getImageData(0, 0, m.width, m.height).data;
+      for (let i = 3; i < d.length; i += 4) { if (d[i] > 0) return true; }
+      return false;
+    };
+    const hasBlur = !!blurMask && hasPixels(blurMask);
+    const hasSticker = stickerObjects.length > 0 || (!!freehandStickerMask && hasPixels(freehandStickerMask));
 
     let previewCanvas = null;
-    if (mask) {
-      const mData = mask.getContext('2d').getImageData(0, 0, mask.width, mask.height);
-      let hasMask = false;
-      for (let i = 0; i < mData.data.length; i += 4) {
-        if (mData.data[i + 3] > 0) { hasMask = true; break; }
-      }
-      if (hasMask || (localMode === 'blackbar' && enabledDets.length > 0)) {
-        const barSettings = localMode === 'blackbar' ? { width: localBarWidth, length: localBarLength, angle: localBarAngle } : null;
-        previewCanvas = applyMaskedBlur(src, mask, localMode, localStrength, enabledDets, barSettings);
-      }
+    if (hasBlur || hasSticker) {
+      previewCanvas = applyMaskedBlur(
+        src, blurMask, wantBlur ? localMode : 'none', localStrength,
+        stickerObjects, freehandStickerMask, localBarColor || '#000000',
+      );
     }
 
     const thumbSource = previewCanvas || src;
@@ -606,7 +680,7 @@ export default function BatchEditorScreen({ onBack }) {
 
     updateImage(imageEntry.id, {
       editDetections: editDets,
-      blurSettings: { mode: localMode, strength: localStrength, barWidth: localBarWidth, barLength: localBarLength, barAngle: localBarAngle },
+      blurSettings: { mode: localMode, stickerEnabled: localStickerEnabled, strength: localStrength, barWidth: localBarWidth, barLength: localBarLength, barAngle: localBarAngle, barStyle: localBarStyle, barColor: localBarColor },
       localFeather: localFeather,
       faceBlurCanvas: faceBlurCanvasRef.current,
       tattooMaskCanvas: tattooMaskCanvasRef.current,
@@ -615,7 +689,7 @@ export default function BatchEditorScreen({ onBack }) {
       thumbnailUrl,
     });
     onBack();
-  }, [imageEntry, src, editDets, localMode, localStrength, localFeather, localBarWidth, localBarLength, localBarAngle, buildPreviewMask, updateImage, onBack]);
+  }, [imageEntry, src, editDets, localMode, localStickerEnabled, localStrength, localFeather, localBarWidth, localBarLength, localBarAngle, localBarStyle, localBarColor, buildPreviewMask, updateImage, onBack]);
 
   if (!imageEntry || !src) {
     return (
@@ -629,125 +703,218 @@ export default function BatchEditorScreen({ onBack }) {
     ? Math.round(((editDets[selectedIdx].bottomRight[0] - editDets[selectedIdx].topLeft[0]) / 2) / editDets[selectedIdx].origHw * 100)
     : 100;
 
-  // --- Blur dropdown (shared between shape and freehand) ---
+  // Blur type + current-sticker selector. Gaussian / Pixelate pick the blur
+  // TYPE (always one active in Auto/Shape). The Stickers dropdown picks the
+  // style/color of the SELECTED sticker, or the default for the next Add
+  // Sticker. Freehand keeps its exclusive brush picker. Mirrors MaskEditorScreen.
+  const isFreehand = blurSubMode === 'freehand';
+  const selectedDet = selectedIdx !== null ? editDets[selectedIdx] : null;
+  const selectedSticker = selectedDet && selectedDet.kind === 'sticker' ? selectedDet : null;
+  const stickerOn = !!localStickerEnabled; // freehand color-brush flag
+  const curStickerStyle = selectedSticker ? (selectedSticker.barStyle || 'solid') : (localBarStyle || 'solid');
+  const curStickerColor = selectedSticker ? (selectedSticker.barColor || '#000000') : (localBarColor || '#000000');
+  const activeBarStyle = BAR_STYLES.find((s) => s.key === curStickerStyle) || BAR_STYLES[0];
+  const barLabel = isFreehand ? 'Stickers' : activeBarStyle.label;
+
+  const updateSelectedSticker = (patch) => {
+    if (selectedSticker) {
+      setEditDets((prev) => prev.map((d, i) => (i === selectedIdx ? { ...d, ...patch } : d)));
+    }
+    if ('barStyle' in patch) setLocalBarStyle(patch.barStyle);
+    if ('barColor' in patch) setLocalBarColor(patch.barColor);
+    if ('barWidth' in patch) setLocalBarWidth(patch.barWidth);
+    if ('barLength' in patch) setLocalBarLength(patch.barLength);
+    if ('barAngle' in patch) setLocalBarAngle(patch.barAngle);
+  };
+
   const blurDropdownJSX = (
-    <div className="blur-dropdown" ref={blurDropdownRef}>
-      <button
-        ref={blurTriggerRef}
-        className="blur-dropdown-trigger"
-        onClick={() => {
-          setBlurDropdownOpen(v => {
-            if (!v && blurTriggerRef.current) {
-              const rect = blurTriggerRef.current.getBoundingClientRect();
-              const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-              const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
-              const nextLeft = Math.max(12, Math.min(rect.left, viewportWidth - rect.width - 12));
-              setBlurDropdownPos({ bottom: viewportHeight - rect.top + 6, left: nextLeft, minWidth: rect.width });
-            }
-            return !v;
-          });
-        }}
-        aria-expanded={blurDropdownOpen}
-        aria-haspopup="listbox"
-      >
-        <span>{BLUR_MODE_LABELS[localMode]}</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <polyline points={blurDropdownOpen ? '18 15 12 9 6 15' : '6 9 12 15 18 9'} />
-        </svg>
-      </button>
-      {blurDropdownOpen && blurDropdownPos && (
-        <div className="blur-dropdown-menu" role="listbox"
-          style={{ bottom: blurDropdownPos.bottom, left: blurDropdownPos.left, minWidth: blurDropdownPos.minWidth }}>
-          {[
-            { value: 'gaussian', label: 'Gaussian' },
-            { value: 'pixelate', label: 'Pixelate' },
-            { value: 'blackbar', label: 'Black Bar' },
-          ].map(opt => (
+    <div className="blur-style-row" role="radiogroup" aria-label="Blur style">
+      {[
+        { value: 'gaussian', label: 'Gaussian' },
+        { value: 'pixelate', label: 'Pixelate' },
+      ].map((opt) => {
+        const isSelected = localMode === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={isSelected}
+            className={`blur-style-btn${isSelected ? ' is-selected' : ''}`}
+            onClick={() => {
+              setBarStyleMenuOpen(false);
+              if (isFreehand) {
+                // Freehand: blur and color brush are mutually exclusive.
+                setLocalMode(opt.value);
+                setLocalStickerEnabled(false);
+              } else {
+                // Auto/Shape: just the blur type (always one active).
+                setLocalMode(opt.value);
+              }
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+      <div className="bar-style-menu-wrap" ref={barStyleMenuRef}>
+        {isFreehand ? (
+          <button
+            ref={barStyleTriggerRef}
+            type="button"
+            role="radio"
+            aria-checked={stickerOn}
+            className={`blur-style-btn bar-style-trigger${stickerOn ? ' is-selected' : ''}`}
+            onClick={() => {
+              setLocalMode('none');
+              setLocalStickerEnabled(true);
+              setBarColorPickerOpen(true);
+            }}
+          >
+            <span>Colors</span>
+            <span className="bar-style-trigger-swatch" style={{ background: curStickerColor }} aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            ref={barStyleTriggerRef}
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={barStyleMenuOpen}
+            className={`blur-style-btn bar-style-trigger${selectedSticker ? ' is-selected' : ''}`}
+            onClick={() => {
+              setBarStyleMenuOpen((v) => {
+                const next = !v;
+                if (next && barStyleTriggerRef.current) {
+                  const r = barStyleTriggerRef.current.getBoundingClientRect();
+                  setBarStyleMenuPos({ left: r.left, bottom: window.innerHeight - r.top + 4 });
+                }
+                return next;
+              });
+            }}
+          >
+            <span>{barLabel}</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        )}
+        {barStyleMenuOpen && barStyleMenuPos && createPortal(
+          <div
+            ref={barStyleMenuElRef}
+            className="bar-style-menu"
+            role="menu"
+            aria-label="Sticker style"
+            style={{ left: barStyleMenuPos.left, bottom: barStyleMenuPos.bottom }}
+          >
             <button
-              key={opt.value}
-              className={`blur-dropdown-item${localMode === opt.value ? ' active' : ''}`}
-              role="option"
-              aria-selected={localMode === opt.value}
-              onClick={() => { setLocalMode(opt.value); setBlurDropdownOpen(false); }}
+              type="button"
+              role="menuitem"
+              className="bar-style-menu-item bar-style-menu-color"
+              onClick={() => {
+                setBarStyleMenuOpen(false);
+                setBarColorPickerOpen(true);
+              }}
             >
-              {opt.label}
+              <span className="bar-style-menu-swatch" style={{ background: curStickerColor }} aria-hidden="true" />
+              <span>Color…</span>
             </button>
-          ))}
-        </div>
-      )}
+            <div className="bar-style-menu-divider" role="separator" />
+            {BAR_STYLES.map((s) => {
+              const sel = curStickerStyle === s.key;
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={sel}
+                  className={`bar-style-menu-item${sel ? ' is-active' : ''}`}
+                  onClick={() => {
+                    updateSelectedSticker({ barStyle: s.key });
+                    setBarStyleMenuOpen(false);
+                  }}
+                >
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )}
+      </div>
     </div>
   );
 
-  const blurAdjustmentsRow = localMode === 'blackbar' ? (
+  const wantBlurControls = localMode === 'gaussian' || localMode === 'pixelate';
+  const blurAdjustmentsRow = (
     <>
       <div className="toolbar-row">
         <div className="toolbar-group toolbar-group-dropdown">
           {blurDropdownJSX}
         </div>
-        <div className="toolbar-group toolbar-group-slider">
-          <label className="toolbar-slider">
-            <span>Width</span>
-            <input type="range" min="5" max="80" value={localBarWidth}
-              onChange={(e) => { setLocalBarWidth(parseInt(e.target.value, 10));}} />
-          </label>
-        </div>
-        <div className="toolbar-group toolbar-group-slider">
-          <label className="toolbar-slider">
-            <span>Length</span>
-            <input type="range" min="50" max="200" value={localBarLength}
-              onChange={(e) => { setLocalBarLength(parseInt(e.target.value, 10));}} />
-          </label>
-        </div>
+        {wantBlurControls && (
+          <>
+            <div className="toolbar-group toolbar-group-slider">
+              <label className="toolbar-slider">
+                <span>Blur Strength</span>
+                <input type="range" min="5" max="60" value={localStrength}
+                  onChange={(e) => { setLocalStrength(parseInt(e.target.value, 10));}} />
+              </label>
+            </div>
+            <div className="toolbar-group toolbar-group-slider">
+              <label className="toolbar-slider">
+                <span>Feather</span>
+                <input type="range" min="0" max="60" value={localFeather}
+                  onChange={(e) => { setLocalFeather(parseInt(e.target.value, 10));}} />
+              </label>
+            </div>
+          </>
+        )}
       </div>
-      <div className="toolbar-row">
-        <div className="toolbar-group toolbar-group-slider toolbar-group-fill">
-          <label className="toolbar-slider">
-            <span>Angle</span>
-            <input type="range" min="-45" max="45" value={localBarAngle}
-              onChange={(e) => { setLocalBarAngle(parseInt(e.target.value, 10));}} />
-          </label>
+      {selectedSticker && (
+        <div className="toolbar-row">
+          <div className="toolbar-group toolbar-group-slider">
+            <label className="toolbar-slider">
+              <span>Width</span>
+              <input type="range" min="10" max="100" value={selectedSticker.barWidth ?? 100}
+                onChange={(e) => updateSelectedSticker({ barWidth: parseInt(e.target.value, 10) })} />
+            </label>
+          </div>
+          <div className="toolbar-group toolbar-group-slider">
+            <label className="toolbar-slider">
+              <span>Length</span>
+              <input type="range" min="10" max="100" value={selectedSticker.barLength ?? 100}
+                onChange={(e) => updateSelectedSticker({ barLength: parseInt(e.target.value, 10) })} />
+            </label>
+          </div>
+          <div className="toolbar-group toolbar-group-slider">
+            <label className="toolbar-slider">
+              <span>Angle</span>
+              <input type="range" min="-45" max="45" value={selectedSticker.barAngle ?? 0}
+                onChange={(e) => updateSelectedSticker({ barAngle: parseInt(e.target.value, 10) })} />
+            </label>
+          </div>
         </div>
-      </div>
+      )}
     </>
-  ) : (
-    <div className="toolbar-row">
-      <div className="toolbar-group toolbar-group-dropdown">
-        {blurDropdownJSX}
-      </div>
-      <div className="toolbar-group toolbar-group-slider">
-        <label className="toolbar-slider">
-          <span>Blur Strength</span>
-          <input type="range" min="5" max="60" value={localStrength}
-            onChange={(e) => { setLocalStrength(parseInt(e.target.value, 10));}} />
-        </label>
-      </div>
-      <div className="toolbar-group toolbar-group-slider">
-        <label className="toolbar-slider">
-          <span>Feather</span>
-          <input type="range" min="0" max="60" value={localFeather}
-            onChange={(e) => { setLocalFeather(parseInt(e.target.value, 10));}} />
-        </label>
-      </div>
-    </div>
   );
 
   const selectedBlurRegionRow = selectedIdx !== null && editDets[selectedIdx] ? (
     <div className="toolbar-row oval-resize-row">
       <div className="toolbar-group toolbar-group-inline">
         <span className="toolbar-label">
-          {blurSubMode === 'autoface' ? 'Face' : 'Region'} {selectedIdx + 1}
+          {selectedSticker ? 'Sticker' : (blurSubMode === 'autoface' ? 'Face' : 'Blur')} {selectedIdx + 1}
         </span>
       </div>
       <div className="toolbar-group toolbar-group-slider">
         <label className="toolbar-slider">
-          <span>{blurSubMode === 'autoface' ? 'Size' : 'Resize'}</span>
+          <span>Resize</span>
           <input type="range" min="30" max="300" value={selectedOvalScale}
             onChange={(e) => { handleOvalResize(parseInt(e.target.value, 10));}} />
         </label>
       </div>
       <div className="toolbar-group toolbar-group-inline">
         <button className="tool-btn" onClick={() => handleRemoveFace(selectedIdx)}
-          title="Remove selected region">
+          title="Remove selected">
           Remove
         </button>
       </div>
@@ -760,6 +927,7 @@ export default function BatchEditorScreen({ onBack }) {
       <div className="mask-editor-toolbar-body">
         {topMode === 'tattoo' && (
           <div className="toolbar-panel mask-editor-toolbar-panel">
+            <h3 className="mode-panel-title">Tattoo Removal</h3>
             <div className="toolbar-row brush-size-row">
               <div className="toolbar-group toolbar-group-slider toolbar-group-fill">
                 <label className="toolbar-slider">
@@ -773,15 +941,14 @@ export default function BatchEditorScreen({ onBack }) {
               <div className="toolbar-group toolbar-group-buttons">
                 <button className={`tool-btn ${faceBlurTool === 'brush' ? 'active' : ''}`}
                   onClick={() => setFaceBlurTool('brush')} title="Paint over tattoos to remove">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                    <path d="M3.5 20.5c-1 1-2.5.5-2.5-.8 0-1.5 1.2-3.2 3-4.7l2 2c-1.5 1.8-2 3-2.5 3.5z" />
-                    <path d="M6.5 15.5L18.8 3.2c.8-.8 2-.8 2.8 0l-.3.3c.8.8.8 2 0 2.8L8.5 18l-2-2.5z" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42" />
                   </svg>
                   Paint
                 </button>
                 <button className={`tool-btn ${faceBlurTool === 'eraser' ? 'active' : ''}`}
                   onClick={() => setFaceBlurTool('eraser')} title="Erase painted tattoo mask">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 20H7L3 16l9-9 8 8-4 4" />
                     <path d="M6 11l4-4" />
                   </svg>
@@ -799,26 +966,16 @@ export default function BatchEditorScreen({ onBack }) {
 
         {topMode === 'blur' && blurSubMode === 'shape' && (
           <div className="toolbar-panel mask-editor-toolbar-panel">
+            <h3 className="mode-panel-title">Shape Blur</h3>
             {blurAdjustmentsRow}
             {selectedBlurRegionRow}
             <div className="toolbar-row">
               <div className="toolbar-group toolbar-group-buttons">
-                <div className="shape-toggle">
-                  <button className={`shape-toggle-btn${shapeType === 'oval' ? ' active' : ''}`}
-                    onClick={() => setShapeType('oval')}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="12" rx="10" ry="7"/></svg>
-                    Oval
-                  </button>
-                  <button className={`shape-toggle-btn${shapeType === 'rectangle' ? ' active' : ''}`}
-                    onClick={() => setShapeType('rectangle')}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="5" width="18" height="14" rx="2"/></svg>
-                    Rectangle
-                  </button>
-                </div>
-              </div>
-              <div className="toolbar-group toolbar-group-inline">
-                <button className="tool-btn" onClick={handleAddRegion} title="Add a blur region">
-                  + Add
+                <button className="tool-btn" onClick={handleAddBlur} title="Add a blur region">
+                  + Add Blur
+                </button>
+                <button className="tool-btn" onClick={handleAddSticker} title="Add a sticker">
+                  + Add Sticker
                 </button>
               </div>
             </div>
@@ -827,11 +984,15 @@ export default function BatchEditorScreen({ onBack }) {
 
         {topMode === 'blur' && blurSubMode === 'autoface' && (
           <div className="toolbar-panel mask-editor-toolbar-panel">
+            <h3 className="mode-panel-title">Auto Blur</h3>
             {blurAdjustmentsRow}
             {selectedBlurRegionRow}
             <div className="toolbar-row">
               <div className="toolbar-group toolbar-group-buttons">
-                <button className="tool-btn" onClick={handleClearFaces} title="Clear all face blur regions">
+                <button className="tool-btn" onClick={handleAddSticker} title="Add a sticker">
+                  + Add Sticker
+                </button>
+                <button className="tool-btn" onClick={handleClearFaces} title="Clear all blur regions">
                   Clear All
                 </button>
               </div>
@@ -841,6 +1002,7 @@ export default function BatchEditorScreen({ onBack }) {
 
         {topMode === 'blur' && blurSubMode === 'freehand' && (
           <div className="toolbar-panel mask-editor-toolbar-panel">
+            <h3 className="mode-panel-title">Freehand Blur</h3>
             <div className="toolbar-row brush-size-row">
               <div className="toolbar-group toolbar-group-dropdown">
                 {blurDropdownJSX}
@@ -853,35 +1015,7 @@ export default function BatchEditorScreen({ onBack }) {
                 </label>
               </div>
             </div>
-            {localMode === 'blackbar' ? (
-              <>
-                <div className="toolbar-row">
-                  <div className="toolbar-group toolbar-group-slider">
-                    <label className="toolbar-slider">
-                      <span>Width</span>
-                      <input type="range" min="5" max="80" value={localBarWidth}
-                        onChange={(e) => { setLocalBarWidth(parseInt(e.target.value, 10));}} />
-                    </label>
-                  </div>
-                  <div className="toolbar-group toolbar-group-slider">
-                    <label className="toolbar-slider">
-                      <span>Length</span>
-                      <input type="range" min="50" max="200" value={localBarLength}
-                        onChange={(e) => { setLocalBarLength(parseInt(e.target.value, 10));}} />
-                    </label>
-                  </div>
-                </div>
-                <div className="toolbar-row">
-                  <div className="toolbar-group toolbar-group-slider toolbar-group-fill">
-                    <label className="toolbar-slider">
-                      <span>Angle</span>
-                      <input type="range" min="-45" max="45" value={localBarAngle}
-                        onChange={(e) => { setLocalBarAngle(parseInt(e.target.value, 10));}} />
-                    </label>
-                  </div>
-                </div>
-              </>
-            ) : (
+            {wantBlurControls && (
               <div className="toolbar-row">
                 <div className="toolbar-group toolbar-group-slider">
                   <label className="toolbar-slider">
@@ -903,15 +1037,14 @@ export default function BatchEditorScreen({ onBack }) {
               <div className="toolbar-group toolbar-group-buttons">
                 <button className={`tool-btn ${faceBlurTool === 'brush' ? 'active' : ''}`}
                   onClick={() => setFaceBlurTool('brush')} title="Paint blur regions freehand">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                    <path d="M3.5 20.5c-1 1-2.5.5-2.5-.8 0-1.5 1.2-3.2 3-4.7l2 2c-1.5 1.8-2 3-2.5 3.5z" />
-                    <path d="M6.5 15.5L18.8 3.2c.8-.8 2-.8 2.8 0l-.3.3c.8.8.8 2 0 2.8L8.5 18l-2-2.5z" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42" />
                   </svg>
                   Paint
                 </button>
                 <button className={`tool-btn ${faceBlurTool === 'eraser' ? 'active' : ''}`}
                   onClick={() => setFaceBlurTool('eraser')} title="Erase painted blur regions">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 20H7L3 16l9-9 8 8-4 4" />
                     <path d="M6 11l4-4" />
                   </svg>
@@ -928,17 +1061,9 @@ export default function BatchEditorScreen({ onBack }) {
         )}
       </div>
 
-      {/* Level 1: Top-mode tabs (Tattoo Removal / Blur) — mirrors MaskEditorScreen */}
+      {/* Level 1: Top-mode tabs — Blur (left) + Tattoo Removal (right),
+          matching the Redact.ID single-image editor layout. */}
       <div className="toolbar-tabs">
-        <button ref={tattooTabRef}
-          className={`toolbar-tab${topMode === 'tattoo' ? ' active' : ''}`}
-          onClick={() => { setTopMode('tattoo'); setBlurPickerOpen(false); setSelectedIdx(null); }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3.5 20.5c-1 1-2.5.5-2.5-.8 0-1.5 1.2-3.2 3-4.7l2 2c-1.5 1.8-2 3-2.5 3.5z" />
-            <path d="M6.5 15.5L18.8 3.2c.8-.8 2-.8 2.8 0l-.3.3c.8.8.8 2 0 2.8L8.5 18l-2-2.5z" />
-          </svg>
-          Tattoo Removal
-        </button>
         <div className="toolbar-tab-wrapper" ref={blurTabRef}>
           <button className={`toolbar-tab${topMode === 'blur' ? ' active' : ''}`}
             onClick={() => {
@@ -948,11 +1073,8 @@ export default function BatchEditorScreen({ onBack }) {
                 setBlurPickerOpen(v => !v);
               }
             }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-              <line x1="9" y1="9" x2="9.01" y2="9" />
-              <line x1="15" y1="9" x2="15.01" y2="9" />
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             </svg>
             {{ autoface: 'Auto Blur', shape: 'Shape Blur', freehand: 'Freehand Blur' }[blurSubMode]}
             <svg className={`blur-tab-chevron${topMode === 'blur' ? ' active' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -963,18 +1085,16 @@ export default function BatchEditorScreen({ onBack }) {
             <div className="blur-mode-picker">
               {[
                 { value: 'autoface', label: 'Auto Blur', icon: (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="10" r="6" />
-                    <path d="M9 9h.01M15 9h.01" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                   </svg>
                 )},
                 { value: 'shape', label: 'Shape Blur', icon: (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="12" rx="10" ry="7"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="12" rx="9" ry="6"/></svg>
                 )},
                 { value: 'freehand', label: 'Freehand Blur', icon: (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                    <path d="M3.5 20.5c-1 1-2.5.5-2.5-.8 0-1.5 1.2-3.2 3-4.7l2 2c-1.5 1.8-2 3-2.5 3.5z" />
-                    <path d="M6.5 15.5L18.8 3.2c.8-.8 2-.8 2.8 0l-.3.3c.8.8.8 2 0 2.8L8.5 18l-2-2.5z" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42" />
                   </svg>
                 )},
               ].map(opt => (
@@ -990,6 +1110,14 @@ export default function BatchEditorScreen({ onBack }) {
             </div>
           )}
         </div>
+        <button ref={tattooTabRef}
+          className={`toolbar-tab${topMode === 'tattoo' ? ' active' : ''}`}
+          onClick={() => { setTopMode('tattoo'); setBlurPickerOpen(false); setSelectedIdx(null); }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
+          </svg>
+          Tattoo Removal
+        </button>
       </div>
     </div>
   );
@@ -1029,7 +1157,7 @@ export default function BatchEditorScreen({ onBack }) {
             {topMode === 'blur' && editDets.map((det, i) => (
               <div
                 key={`face-${i}`}
-                className={`face-overlay${selectedIdx === i ? ' selected' : ''}${det.shape === 'rectangle' ? ' rectangle' : ''}${!det.enabled ? ' face-overlay-disabled' : ''}`}
+                className={`face-overlay${selectedIdx === i ? ' selected' : ''}${det.kind === 'sticker' ? ' sticker-overlay' : ''}${!det.enabled ? ' face-overlay-disabled' : ''}`}
                 style={{
                   position: 'absolute',
                   left: `${(det.topLeft[0] / imgW) * 100}%`,
@@ -1085,6 +1213,14 @@ export default function BatchEditorScreen({ onBack }) {
           onCancel={() => setShowConfirmBack(false)}
         />
       )}
+
+      <ColorSpectrumPicker
+        open={barColorPickerOpen}
+        value={curStickerColor}
+        onChange={(hex) => updateSelectedSticker({ barColor: hex })}
+        onClose={() => setBarColorPickerOpen(false)}
+        ariaLabel="Sticker color"
+      />
     </ScreenShell>
   );
 }

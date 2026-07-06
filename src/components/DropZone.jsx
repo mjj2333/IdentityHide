@@ -1,11 +1,18 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { usePipeline } from '../context/PipelineContext';
 import { useBatch } from '../context/BatchContext';
+import { useEntitlement } from '../context/EntitlementContext';
 import { useImagePipeline } from '../hooks/useImagePipeline';
 import { useCoachMarks, suppressAllWalkthroughs, resetWalkthrough } from '../hooks/useCoachMarks';
 import CoachMark from './CoachMark';
 import ResolutionTierModal from './ResolutionTierModal';
+import RedeemCodeModal from './RedeemCodeModal';
+import BetaWelcomeModal from './BetaWelcomeModal';
+import Wordmark from './Wordmark';
 import { track } from '../utils/analytics';
+import { isNativeApp } from '../utils/platform';
+import { takeNativePhoto } from '../utils/nativeMedia';
+import { useDocumentMeta } from '../hooks/useDocumentMeta';
 import { getSessionInfo, loadSession, clearSession } from '../utils/sessionStore';
 import TipsToggle from './TipsToggle';
 import '../styles/DropZone.css';
@@ -31,32 +38,113 @@ function screenLabel(screen) {
   }
 }
 
+// Icon set — minimal line weight, editorial feel. Kept local so the set is
+// consistent with the Redact.ID home artboard and doesn't drift as future
+// screens reuse Lucide or Heroicons elsewhere.
+const UploadIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M7.5 7.5h-.75A2.25 2.25 0 0 0 4.5 9.75v7.5a2.25 2.25 0 0 0 2.25 2.25h7.5a2.25 2.25 0 0 0 2.25-2.25v-7.5a2.25 2.25 0 0 0-2.25-2.25h-.75m0-3-3-3m0 0-3 3m3-3v11.25m6-2.25h.75a2.25 2.25 0 0 1 2.25 2.25v7.5a2.25 2.25 0 0 1-2.25 2.25h-7.5a2.25 2.25 0 0 1-2.25-2.25v-.75" />
+  </svg>
+);
+const CameraIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+    <path d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+  </svg>
+);
+const BatchIcon = () => (
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="m2.25 7.125 9.75 5.625 9.75-5.625-9.75-5.625-9.75 5.625Z" />
+    <path d="m2.25 12 9.75 5.625L21.75 12" />
+    <path d="m2.25 16.875 9.75 5.625 9.75-5.625" />
+  </svg>
+);
+const ChevRight = ({ size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M9 6l6 6-6 6" />
+  </svg>
+);
+
+const FooterIcons = {
+  feedback: () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" /></svg>,
+  terms: () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" /></svg>,
+  privacy: () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" /></svg>,
+  faq: () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" /></svg>,
+  account: () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>,
+};
+
 export default function DropZone() {
+  useDocumentMeta({
+    title: 'Redact.ID — Blur faces, remove tattoos, strip location from photos',
+    description: 'Redact.ID protects identities in photos — blur faces, remove tattoos, and strip location metadata in your browser before you share. Free and private.',
+    canonical: 'https://redactid.app/',
+    ogImage: 'https://redactid.app/og-image.png',
+  });
   const { setOriginalFile, setScreen, restoreSession, setWarning, setSelectedTierMP } = usePipeline();
   const { seedFiles } = useBatch();
   const { runPipeline } = useImagePipeline();
   const [dragActive, setDragActive] = useState(false);
   const [savedSession, setSavedSession] = useState(null);
   const [restoring, setRestoring] = useState(false);
+  const [showRedeem, setShowRedeem] = useState(false);
+  const { premium } = useEntitlement();
+
+  // Beta welcome popup — shown once per session until the user either
+  // redeems, permanently dismisses, or is already premium. The initial-
+  // state check has to be synchronous, but `premium` from useEntitlement
+  // starts at `false` and only flips true after an async fetch — so we
+  // also peek at localStorage for a stored credential. If the user has
+  // ANY credential cached, the entitlement check that's about to fire
+  // will (almost certainly) confirm premium, and we don't want to flash
+  // the welcome popup during that ~300-800ms verification window.
+  const [showBetaWelcome, setShowBetaWelcome] = useState(() => {
+    if (premium) return false;
+    try {
+      if (localStorage.getItem('ih_beta_welcome_dismissed') === '1') return false;
+      if (localStorage.getItem('ih_user_email')) return false;
+      if (localStorage.getItem('ih_beta_code')) return false;
+    } catch {}
+    return true;
+  });
+  // If premium state flips true after mount (late entitlement fetch),
+  // close the welcome popup — no point advertising the beta to an
+  // already-subscribed user.
+  useEffect(() => {
+    if (premium) setShowBetaWelcome(false);
+  }, [premium]);
+
+  const handleBetaWelcomeSuccess = useCallback(() => {
+    // Redemption succeeded inside the welcome modal. Persist the dismissal
+    // so the user isn't re-prompted on future visits, and close the popup.
+    try { localStorage.setItem('ih_beta_welcome_dismissed', '1'); } catch {}
+    setShowBetaWelcome(false);
+  }, []);
+  const handleBetaWelcomeDismiss = useCallback((dontShowAgain) => {
+    if (dontShowAgain) {
+      try { localStorage.setItem('ih_beta_welcome_dismissed', '1'); } catch {}
+    }
+    setShowBetaWelcome(false);
+  }, []);
   // Pending upload — set when the user picks a file but hasn't yet chosen
   // a resolution tier. Holds { file, width, height } while the modal is open.
   const [pendingUpload, setPendingUpload] = useState(null);
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const batchInputRef = useRef(null);
   const dropTargetRef = useRef(null);
 
   const isMobile = /Mobi|Android/i.test(navigator.userAgent);
 
   const COACH_STEPS = [
-    { targetRef: dropTargetRef, position: 'top', body: isMobile
-      ? 'Tap to choose photos from your gallery, or use the camera button below to take one.'
+    { targetRef: dropTargetRef, position: 'top', title: 'Add a photo', body: isMobile
+      ? 'Tap to choose photos from your gallery, or take one with the camera card below.'
       : 'Drop an image, click to browse, or paste from clipboard.' },
   ];
   const { activeStep, totalSteps, next, dismiss, isActive, restart } = useCoachMarks('drop', COACH_STEPS.length);
 
   useEffect(() => { getSessionInfo().then(setSavedSession); }, []);
 
-  // Hidden admin access: tap logo 5 times
+  // Hidden admin access — five taps on the wordmark in 1.5s.
   const tapCountRef = useRef(0);
   const tapTimerRef = useRef(null);
   useEffect(() => () => clearTimeout(tapTimerRef.current), []);
@@ -68,7 +156,7 @@ export default function DropZone() {
       tapCountRef.current = 0;
       setScreen('admin');
     }
-  }, []);
+  }, [setScreen]);
 
   const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
@@ -100,7 +188,7 @@ export default function DropZone() {
     track('batch_upload', { count: capped.length });
     seedFiles(capped);
     setScreen('batch-grid');
-  }, [setScreen, setWarning]);
+  }, [seedFiles, setScreen, setWarning, MAX_FILE_SIZE]);
 
   const handleFile = useCallback(async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
@@ -119,7 +207,7 @@ export default function DropZone() {
     }
     // Defer the pipeline kickoff until the user picks a tier.
     setPendingUpload({ file, width: size.width, height: size.height });
-  }, [setOriginalFile, runPipeline, readImageSize]);
+  }, [setOriginalFile, runPipeline, readImageSize, MAX_FILE_SIZE]);
 
   // ResolutionTierModal emits `(mp, selectedKey)` on confirm; we only need
   // `mp` here because the modal already persists the key to localStorage
@@ -168,8 +256,7 @@ export default function DropZone() {
     const files = Array.from(input.files || []);
     // Reset the input so picking the same file a second time still fires
     // onChange. Without this, cancelling the resolution-tier modal and then
-    // re-selecting the same image silently does nothing (browser sees no
-    // value change and skips the event).
+    // re-selecting the same image silently does nothing.
     input.value = '';
     if (files.length === 0) return;
     if (files.length > 1) {
@@ -179,10 +266,9 @@ export default function DropZone() {
     }
   }, [handleFile, handleMultipleFiles]);
 
-  // Listen for paste events at the document level so the user can paste an
-  // image without having to click into a specific element first. Attaching to
-  // the <main> element instead required tabIndex={0}, which put a non-interactive
-  // landmark into the tab order.
+  // Listen for paste at the document level so users don't have to focus a
+  // specific element. Attaching to <main> would require tabIndex={0}, which
+  // puts a non-interactive landmark into the tab order.
   useEffect(() => {
     const onPaste = (e) => {
       const items = e.clipboardData?.items;
@@ -199,9 +285,23 @@ export default function DropZone() {
     return () => document.removeEventListener('paste', onPaste);
   }, [handleFile]);
 
-  const onCameraCapture = useCallback(() => {
+  const onCameraCapture = useCallback(async () => {
+    // Native shells get the OS-native camera/library prompt via Capacitor.
+    // Web stays on the file-input fallback (which renders the same chooser
+    // through `capture="environment"` on mobile browsers).
+    if (isNativeApp()) {
+      try {
+        const file = await takeNativePhoto({ source: 'prompt' });
+        if (file) handleFile(file);
+      } catch (err) {
+        console.warn('[DropZone] native camera failed:', err);
+        setWarning('Could not open camera. Please try again.');
+      }
+      return;
+    }
     cameraInputRef.current?.click();
-  }, []);
+  }, [handleFile, setWarning]);
+  const onBatchCapture = useCallback(() => batchInputRef.current?.click(), []);
 
   const handleRestore = useCallback(async () => {
     setRestoring(true);
@@ -216,8 +316,6 @@ export default function DropZone() {
       console.warn('[sessionStore] restore failed:', e?.message || e);
       setSavedSession(null);
       setWarning({ message: 'Couldn\'t restore your previous session — the saved data may be corrupt. Starting fresh.', sticky: true });
-      // Best-effort cleanup of the corrupt entry so the next visit doesn't
-      // offer to restore it again.
       clearSession().catch(() => {});
     } finally {
       setRestoring(false);
@@ -230,30 +328,44 @@ export default function DropZone() {
   }, []);
 
   return (
-    <main className="dropzone-screen">
+    <main className="home-screen">
       <TipsToggle active={isActive} onClick={() => {
         if (isActive) { suppressAllWalkthroughs(); dismiss(); }
         else { resetWalkthrough(); restart(); }
       }} />
-      <div className="dropzone-header">
-        <h1 className="dropzone-title" onClick={handleLogoTap}>
-          <img className="dropzone-logo dropzone-logo-dark" src="/logo-dark-fixed.png" alt="IdentityHide" />
-          <img className="dropzone-logo dropzone-logo-light" src="/logo-light-fixed.png" alt="IdentityHide" />
-        </h1>
-        <p className="dropzone-tagline">Share photos without revealing who you are or where you&apos;ve been. Faces blurred, tattoos removed, location data wiped.</p>
+
+      {/* Wordmark + tagline */}
+      <div className="home-header">
+        <div className="home-wordmark" onClick={handleLogoTap}>
+          <Wordmark size="hero" />
+          {!premium && (
+            <button
+              type="button"
+              className="home-beta-badge home-beta-badge--interactive"
+              aria-label="Redeem a promo code"
+              onClick={(e) => { e.stopPropagation(); setShowRedeem(true); }}
+            >
+              Redeem
+            </button>
+          )}
+        </div>
+        <p className="home-copy home-copy--primary">Share photos without revealing who you are.</p>
+        <p className="home-copy home-copy--secondary">Faces blurred, tattoos removed, location data wiped.</p>
       </div>
 
       {savedSession && (
-        <div className="dropzone-restore">
-          <span>
-            Unsaved work
-            {savedSession.filename && <> on <strong>{savedSession.filename}</strong></>}
-            {screenLabel(savedSession.screen) && <> ({screenLabel(savedSession.screen)})</>}
-            {' — '}{formatTimeAgo(savedSession.savedAt)}
-          </span>
-          <div className="dropzone-restore-actions">
+        <div className="home-restore" role="status">
+          <div className="home-restore-body">
+            <span className="home-restore-label">Unsaved work</span>
+            {savedSession.filename && <span className="home-restore-file">{savedSession.filename}</span>}
+            <span className="home-restore-meta">
+              {screenLabel(savedSession.screen) && <>{screenLabel(savedSession.screen)} · </>}
+              {formatTimeAgo(savedSession.savedAt)}
+            </span>
+          </div>
+          <div className="home-restore-actions">
             <button className="btn btn-primary btn-sm" onClick={handleRestore} disabled={restoring}>
-              {restoring ? 'Restoring...' : 'Resume'}
+              {restoring ? 'Restoring…' : 'Resume'}
             </button>
             <button className="btn btn-ghost btn-sm" onClick={handleDismissSession}>
               Dismiss
@@ -262,27 +374,43 @@ export default function DropZone() {
         </div>
       )}
 
-      <button
-        ref={dropTargetRef}
-        type="button"
-        className={`dropzone-target ${dragActive ? 'dropzone-active' : ''}`}
-        aria-label="Upload an image"
-        onDrop={onDrop}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <div className="dropzone-content">
-          <div className="dropzone-icon">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
+      {/* Affordances */}
+      <div className="home-affordances">
+        <button
+          ref={dropTargetRef}
+          type="button"
+          className={`home-card home-card--primary${dragActive ? ' is-dragactive' : ''}`}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <div className="home-card-iconblock">
+            <UploadIcon />
           </div>
-          <p className="dropzone-label">{isMobile ? 'Tap to choose photos' : 'Drop photos here or click to browse'}</p>
-        </div>
-      </button>
+          <div className="home-card-text">
+            <div className="home-card-title">Choose a photo</div>
+            <div className="home-card-sub">{isMobile ? 'From your library' : 'From library, files, or paste'}</div>
+          </div>
+          <ChevRight size={18} />
+        </button>
+
+        <button type="button" className="home-card home-card--ghost" onClick={onCameraCapture}>
+          <div className="home-card-glyph"><CameraIcon /></div>
+          <div className="home-card-text">
+            <div className="home-card-title">Take photo</div>
+          </div>
+          <ChevRight size={16} />
+        </button>
+
+        <button type="button" className="home-card home-card--ghost" onClick={onBatchCapture}>
+          <div className="home-card-glyph"><BatchIcon /></div>
+          <div className="home-card-text">
+            <div className="home-card-title">Batch mode</div>
+            <div className="home-card-sub">Protect multiple photos at once</div>
+          </div>
+        </button>
+      </div>
 
       <input
         ref={fileInputRef}
@@ -290,7 +418,7 @@ export default function DropZone() {
         accept="image/*"
         multiple
         onChange={onFileSelect}
-        className="dropzone-input"
+        className="home-input"
         aria-label="Choose image files"
       />
       <input
@@ -299,70 +427,43 @@ export default function DropZone() {
         accept="image/*"
         capture="environment"
         onChange={onFileSelect}
-        className="dropzone-input"
+        className="home-input"
         aria-label="Take a photo with camera"
       />
+      <input
+        ref={batchInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        onChange={onFileSelect}
+        className="home-input"
+        aria-label="Choose multiple photos for batch"
+      />
 
-      <button className="camera-btn" onClick={onCameraCapture}>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-          <circle cx="12" cy="13" r="4" />
-        </svg>
-        Take Photo
-      </button>
+      <div className="home-footer-spacer" />
 
-      <div className="dropzone-features">
-        <div className="feature">
-          <span className="feature-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="5"/><path d="M3 21v-2a7 7 0 0 1 14 0v2"/></svg>
-          </span>
-          <span>Face detection & blur</span>
-        </div>
-        <div className="feature">
-          <span className="feature-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M3 12h18M3 18h18"/><line x1="2" y1="2" x2="22" y2="22" strokeWidth="2.5"/></svg>
-          </span>
-          <span>Tattoo removal</span>
-        </div>
-        <div className="feature">
-          <span className="feature-icon">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          </span>
-          <span>Metadata stripped</span>
-        </div>
-      </div>
-
-      <div className="dropzone-bottom-links">
-        <a href="/feedback" className="dropzone-feedback-link">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
-          Send Feedback
+      <nav className="home-footer" aria-label="Info">
+        <a href="/account" className="home-footer-link">
+          <FooterIcons.account />
+          <span>Account</span>
         </a>
-        <a href="/terms" className="dropzone-feedback-link">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="8" y1="13" x2="16" y2="13" />
-            <line x1="8" y1="17" x2="16" y2="17" />
-          </svg>
-          Terms
+        <a href="/feedback" className="home-footer-link">
+          <FooterIcons.feedback />
+          <span>Feedback</span>
         </a>
-        <a href="/privacy" className="dropzone-feedback-link">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-          </svg>
-          Privacy
+        <a href="/faq" className="home-footer-link">
+          <FooterIcons.faq />
+          <span>FAQ</span>
         </a>
-        <a href="/faq" className="dropzone-feedback-link">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-            <line x1="12" y1="17" x2="12.01" y2="17" />
-          </svg>
-          FAQ
+        <a href="/terms" className="home-footer-link">
+          <FooterIcons.terms />
+          <span>Terms</span>
         </a>
-      </div>
+        <a href="/privacy" className="home-footer-link">
+          <FooterIcons.privacy />
+          <span>Privacy</span>
+        </a>
+      </nav>
 
       {isActive && COACH_STEPS[activeStep] && (
         <CoachMark
@@ -382,6 +483,20 @@ export default function DropZone() {
           srcHeight={pendingUpload.height}
           onSelect={handleTierSelect}
           onCancel={handleTierCancel}
+        />
+      )}
+
+      {showRedeem && (
+        <RedeemCodeModal
+          onClose={() => setShowRedeem(false)}
+          onSuccess={() => setShowRedeem(false)}
+        />
+      )}
+
+      {showBetaWelcome && !showRedeem && (
+        <BetaWelcomeModal
+          onSuccess={handleBetaWelcomeSuccess}
+          onDismiss={handleBetaWelcomeDismiss}
         />
       )}
     </main>

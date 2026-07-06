@@ -96,6 +96,34 @@ export function downscaleToMegapixels(sourceCanvas, targetMP = 1) {
 }
 
 /**
+ * Cap a canvas so its longest side is <= maxDim, preserving aspect ratio and
+ * rounding to multiples of 16 (VAE stride alignment). Returns
+ * { canvas, scaled }: `scaled` is false (and `canvas` is the original) when no
+ * downscale was needed, so callers can avoid freeing a canvas they still use.
+ *
+ * Used to keep the working/editing image within a memory- and canvas-size
+ * budget — iOS Safari kills the tab when a 12–24MP photo spawns several
+ * full-res canvases, and its 2D/WebGL canvases top out around 4096px.
+ */
+export function capToMaxDimension(sourceCanvas, maxDim) {
+  const ALIGN = 16;
+  const { width, height } = sourceCanvas;
+  const longest = Math.max(width, height);
+  if (!maxDim || longest <= maxDim) {
+    return { canvas: sourceCanvas, scaled: false };
+  }
+  const scale = maxDim / longest;
+  const newW = Math.max(ALIGN, Math.round((width * scale) / ALIGN) * ALIGN);
+  const newH = Math.max(ALIGN, Math.round((height * scale) / ALIGN) * ALIGN);
+  const c = document.createElement('canvas');
+  c.width = newW;
+  c.height = newH;
+  c.getContext('2d').drawImage(sourceCanvas, 0, 0, newW, newH);
+  console.log(`[cap] ${width}x${height} → ${newW}x${newH} (max ${maxDim}px)`);
+  return { canvas: c, scaled: true };
+}
+
+/**
  * Upscale a canvas to target dimensions using high-quality drawImage.
  */
 export function upscaleCanvas(sourceCanvas, targetW, targetH) {

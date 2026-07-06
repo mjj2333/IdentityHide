@@ -51,3 +51,33 @@ colors.txt
 deno.lock
 brand-kit/
 qr.txt
+
+# iOS / Capacitor build artifacts. The Xcode project itself (ios/App) is
+# checked in so the native shell is reproducible across machines, but the
+# generated/per-developer pieces are not.
+ios/App/Pods/
+ios/App/App/public/
+ios/App/output/
+ios/App/build/
+ios/DerivedData/
+ios/**/xcuserdata/
+ios/**/*.xcworkspace/xcuserdata/
+ios/App/Podfile.lock
+
+# Android / Capacitor build artifacts. Same idea as iOS: the Gradle project
+# is checked in, but generated and machine-specific pieces are not.
+android/app/build/
+android/app/src/main/assets/public/
+android/build/
+android/.gradle/
+android/local.properties
+android/captures/
+android/app/release/
+android/key.properties
+android/*.keystore
+android/*.jks
+
+# Capacitor live-reload backup. The cap-livereload.mjs script writes this
+# while it's running and removes it on exit, but a crashed run can leave it
+# behind — keep it out of git either way.
+capacitor.config.json.bak

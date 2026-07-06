@@ -6,8 +6,20 @@ const OFFLINE_CACHE = 'offline-v1';
 const ASSET_CACHE = `assets-${CACHE_VERSION}`;
 
 self.addEventListener('install', (event) => {
+  // Precache both the offline fallback AND the app shell ("/"). Precaching
+  // the shell at install time means the cache is ready the moment this SW
+  // activates, instead of needing a subsequent navigation to populate it.
+  // Existing users who go offline immediately after accepting the update
+  // toast still get a working app. {cache: 'reload'} bypasses HTTP caches
+  // so we fetch the freshly-deployed shell (which references the current
+  // hashed assets), not a stale browser-cached copy.
   event.waitUntil(
-    caches.open(OFFLINE_CACHE).then(cache => cache.add('/offline.html'))
+    Promise.all([
+      caches.open(OFFLINE_CACHE).then((cache) => cache.add('/offline.html')),
+      caches.open(ASSET_CACHE).then((cache) =>
+        cache.add(new Request('/', { cache: 'reload' }))
+      ),
+    ])
   );
   // NB: We no longer call self.skipWaiting() here. A new SW sits in the
   // `waiting` state until the client posts a SKIP_WAITING message, which
@@ -45,10 +57,25 @@ self.addEventListener('fetch', (event) => {
     return; // let the browser handle it directly
   }
 
-  // Navigation: network-first, offline fallback
+  // Navigation: network-first, but cache successful responses so the app
+  // works offline after the user has visited at least once. Falls back to
+  // the cached app shell first, then /offline.html only as a last resort
+  // (truly first-time offline with no prior cache).
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(() => caches.match('/offline.html'))
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(ASSET_CACHE).then((cache) => cache.put('/', clone));
+          }
+          return response;
+        })
+        .catch(async () => {
+          const cachedShell = await caches.match('/');
+          if (cachedShell) return cachedShell;
+          return caches.match('/offline.html');
+        })
     );
     return;
   }

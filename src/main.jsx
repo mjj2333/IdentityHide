@@ -3,6 +3,15 @@ import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
 import { initSentry, captureException } from './utils/sentry.js'
 
+// Self-hosted fonts (bundled via @fontsource-variable). Loading here once
+// so Fraunces/Inter/JetBrains Mono are available everywhere the app
+// references them via CSS variables (`--serif`, `--sans`, `--mono`).
+// No third-party requests — all font bytes are served from the app's own
+// origin, consistent with the privacy-first posture.
+import '@fontsource-variable/fraunces';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/jetbrains-mono';
+
 // Initialize Sentry before the app mounts so the very earliest runtime errors
 // (e.g. module-level throws in a lazy chunk) get captured.
 initSentry();

@@ -1,5 +1,5 @@
 /**
- * ComfyUI workflow builders for IdentityHide.
+ * ComfyUI workflow builders for Redact.ID.
  * Generates API-format workflow JSON for tattoo removal.
  */
 
@@ -123,7 +123,7 @@ export function buildTattooRemovalWorkflow(imageName, maskName, options = {}) {
     "15": {
       "class_type": "SaveImage",
       "inputs": {
-        "filename_prefix": "IdentityHide_Inpaint",
+        "filename_prefix": "Redact.ID_Inpaint",
         "images": ["14", 0],
       },
     },

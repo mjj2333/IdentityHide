@@ -1,8 +1,10 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { usePipeline } from '../context/PipelineContext';
 import { useImagePipeline } from '../hooks/useImagePipeline';
 import { canvasToBlob, downloadBlob, generateExportFilename } from '../utils/imageHelpers';
 import { track } from '../utils/analytics';
+import { isNativeApp } from '../utils/platform';
+import { shareNativeFile } from '../utils/nativeMedia';
 import { useZoomPan } from '../hooks/useZoomPan';
 import { useCoachMarks, suppressAllWalkthroughs } from '../hooks/useCoachMarks';
 import { useFocusTrap } from '../hooks/useFocusTrap';
@@ -64,18 +66,16 @@ function FeedbackPrompt({ onEditAnother, onDismiss, onGiveFeedback }) {
             Return to Export
           </button>
           <button className="btn btn-secondary" onClick={onEditAnother}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <polyline points="21 15 16 10 5 21" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
             </svg>
             Edit Another Photo
           </button>
           <div className="feedback-prompt-divider" />
-          <p className="feedback-prompt-text" id="feedback-prompt-text">We&apos;re in beta — your feedback directly shapes what we build next.</p>
+          <p className="feedback-prompt-text" id="feedback-prompt-text">Your feedback directly shapes what we build next.</p>
           <button className="btn btn-secondary" onClick={onGiveFeedback}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
             </svg>
             Give Feedback
           </button>
@@ -114,13 +114,31 @@ export default function ExportScreen({ onFeedback }) {
     handleTouchMove: zoomTouchMove,
     handleTouchEnd: zoomTouchEnd,
   } = useZoomPan(imgW, imgH, canvasWrapRef, { oneFingerPan: true });
-  const [format, setFormat] = useState('png');
-  const [quality, setQuality] = useState(92);
+  const [format, setFormat] = useState('jpeg');
+  const [quality, setQuality] = useState(75);
   const [showOriginal, setShowOriginal] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [fileSize, setFileSize] = useState(null);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [exportError, setExportError] = useState(null);
+
+  // Whether the "Share" affordance should appear instead of just download:
+  //   - Native shell: always (the OS share sheet is the right primitive)
+  //   - iOS web: only when the browser exposes Web Share with files (the
+  //     only path to land a processed image in Photos on iOS Safari)
+  //   - Android/desktop web: keep just the plain download CTA
+  const isIOS = useMemo(() => /iPad|iPhone|iPod/.test(navigator.userAgent), []);
+  const canShare = useMemo(() => {
+    if (isNativeApp()) return true;
+    if (!isIOS) return false;
+    if (typeof navigator === 'undefined' || !navigator.share || !navigator.canShare) return false;
+    try {
+      const testFile = new File(['test'], 'test.png', { type: 'image/png' });
+      return navigator.canShare({ files: [testFile] });
+    } catch {
+      return false;
+    }
+  }, [isIOS]);
 
   useEffect(() => {
     const canvas = previewRef.current;
@@ -185,9 +203,21 @@ export default function ExportScreen({ onFeedback }) {
       const mimeType = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
       const blob = await Promise.race([canvasToBlob(fullResOutput, mimeType, quality / 100), timeout]);
       const filename = generateExportFilename(ext);
-      downloadBlob(blob, filename);
-      track('export_completed', { format, quality, action: 'download' });
-      if (mountedRef.current) setShowFeedbackPrompt(true);
+      // On native shells the OS share sheet is the right idiom for "save"
+      // — it covers Photos, Files, AirDrop, third-party apps. A plain
+      // download (which on web triggers a Blob download) doesn't have an
+      // analog on iOS/Android; the native bridge replaces it.
+      if (isNativeApp()) {
+        const { shared } = await shareNativeFile(blob, filename, mimeType);
+        if (shared) {
+          track('export_completed', { format, quality, action: 'share' });
+          if (mountedRef.current) setShowFeedbackPrompt(true);
+        }
+      } else {
+        downloadBlob(blob, filename);
+        track('export_completed', { format, quality, action: 'download' });
+        if (mountedRef.current) setShowFeedbackPrompt(true);
+      }
     } catch (err) {
       console.error('Export failed:', err);
       if (mountedRef.current) {
@@ -204,14 +234,23 @@ export default function ExportScreen({ onFeedback }) {
   }, [format, quality, buildExportOutput]);
 
   const handleShare = useCallback(async () => {
-    if (!navigator.share || !navigator.canShare) return;
     try {
       const fullResOutput = await buildExportOutput();
       if (!fullResOutput) return;
       const mimeType = format === 'png' ? 'image/png' : format === 'webp' ? 'image/webp' : 'image/jpeg';
       const ext = format === 'jpeg' ? 'jpg' : format;
       const blob = await canvasToBlob(fullResOutput, mimeType, quality / 100);
-      const file = new File([blob], generateExportFilename(ext), { type: mimeType });
+      const filename = generateExportFilename(ext);
+      if (isNativeApp()) {
+        const { shared } = await shareNativeFile(blob, filename, mimeType);
+        if (shared) {
+          track('export_completed', { format, quality, action: 'share' });
+          if (mountedRef.current) setShowFeedbackPrompt(true);
+        }
+        return;
+      }
+      if (!navigator.share || !navigator.canShare) return;
+      const file = new File([blob], filename, { type: mimeType });
       if (navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file] });
         track('export_completed', { format, quality, action: 'share' });
@@ -242,65 +281,59 @@ export default function ExportScreen({ onFeedback }) {
     : '';
 
   const toolbarContent = (
-    <div className="bottom-toolbar-inner">
-      {/* Main controls group */}
-      <div className="export-toolbar-group">
-        <div className="toolbar-row">
-          <div className="toolbar-group">
-            <div className="format-toggle format-toggle-compact">
-              {['png', 'jpeg', 'webp'].map(f => (
-                <button
-                  key={f}
-                  className={`format-toggle-btn ${format === f ? 'active' : ''}`}
-                  onClick={() => setFormat(f)}
-                >
-                  {f.toUpperCase()}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className={`toolbar-group ${format === 'png' ? 'quality-disabled' : ''}`}>
-            <label className="toolbar-slider">
-              <span>Quality{format === 'png' ? ' (N/A)' : ` ${quality}%`}</span>
-              <input type="range" min="10" max="100" value={quality}
-                disabled={format === 'png'}
-                onChange={(e) => setQuality(parseInt(e.target.value))} />
-            </label>
-          </div>
-          <span className="file-info-compact">{dims} &middot; {formatSize(fileSize)}</span>
-        </div>
-        {exportError && <div className="toolbar-row export-error-row"><span className="export-error-msg">{exportError}</span></div>}
-        <div className="toolbar-row export-action-row">
-          <button ref={downloadBtnRef} className="btn btn-primary export-action-btn" onClick={handleDownload} disabled={downloading}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            {downloading ? 'Building...' : 'Download'}
-          </button>
-          {typeof navigator !== 'undefined' && navigator.share && (
-            <button className="btn btn-secondary export-action-btn" onClick={handleShare}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="18" cy="5" r="3" />
-                <circle cx="6" cy="12" r="3" />
-                <circle cx="18" cy="19" r="3" />
-                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-              </svg>
-              Share
+    <div className="export-toolbar">
+      <div className="export-format">
+        <span className="export-format-label">Format</span>
+        <div className="export-format-buttons">
+          {['jpeg', 'png', 'webp'].map(f => (
+            <button
+              key={f}
+              type="button"
+              className={`export-format-btn${format === f ? ' is-active' : ''}`}
+              onClick={() => setFormat(f)}
+            >
+              {f === 'jpeg' ? 'JPEG' : f.toUpperCase()}
             </button>
-          )}
+          ))}
         </div>
       </div>
 
-      {/* Feedback group */}
-      <div className="export-feedback-group">
-        <button className="btn btn-secondary export-feedback-btn" onClick={onFeedback}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      {format === 'jpeg' && (
+        <div className="export-quality">
+          <div className="export-quality-row">
+            <span className="export-quality-label">Quality</span>
+            <span className="export-quality-value">{quality}%</span>
+          </div>
+          <input
+            type="range"
+            className="export-quality-slider"
+            min="10"
+            max="100"
+            value={quality}
+            onChange={(e) => setQuality(parseInt(e.target.value, 10))}
+            aria-label="JPEG quality"
+          />
+        </div>
+      )}
+
+      {fileSize && (
+        <div className="export-file-info">{dims} · {formatSize(fileSize)}</div>
+      )}
+
+      {exportError && <div className="export-error-msg" role="alert">{exportError}</div>}
+
+      <div className="export-primary-row">
+        <button
+          ref={downloadBtnRef}
+          type="button"
+          className="export-save-btn"
+          onClick={canShare ? handleShare : handleDownload}
+          disabled={downloading}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
           </svg>
-          Send Feedback
+          {downloading ? 'Building…' : (canShare ? 'Save to photos' : 'Download')}
         </button>
       </div>
     </div>
@@ -324,22 +357,28 @@ export default function ExportScreen({ onFeedback }) {
           className="export-zoom-wrapper"
           style={{ transform: getTransformStyle(), transformOrigin: 'center center' }}
         >
-          <canvas ref={previewRef} className="export-canvas-full" />
+          {/* Tight frame sized to the canvas's natural pixel dimensions.
+              The compare button inside anchors to the image corners so it
+              always sits fully within the rendered image, regardless of
+              how the zoom hook scales the frame to fit. */}
+          <div className="export-canvas-frame">
+            <canvas ref={previewRef} className="export-canvas-full" />
+            <button
+              className={`compare-floating-btn ${showOriginal ? 'active' : ''}`}
+              onClick={() => setShowOriginal(v => !v)}
+              onTouchStart={(e) => e.stopPropagation()}
+              title={showOriginal ? 'Showing original' : 'Show original'}
+              aria-label={showOriginal ? 'Showing original image — tap to show result' : 'Show original image'}
+              aria-pressed={showOriginal}
+            >
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="2" y="4" width="7" height="16" rx="2" fill={showOriginal ? 'currentColor' : 'none'} />
+                <line x1="12" y1="3" x2="12" y2="21" />
+                <rect x="15" y="4" width="7" height="16" rx="2" />
+              </svg>
+            </button>
+          </div>
         </div>
-        <button
-          className={`compare-floating-btn ${showOriginal ? 'active' : ''}`}
-          onClick={() => setShowOriginal(v => !v)}
-          onTouchStart={(e) => e.stopPropagation()}
-          title={showOriginal ? 'Showing original' : 'Show original'}
-          aria-label={showOriginal ? 'Showing original image — tap to show result' : 'Show original image'}
-          aria-pressed={showOriginal}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="2" y="4" width="7" height="16" rx="2" fill={showOriginal ? 'currentColor' : 'none'} />
-            <line x1="12" y1="3" x2="12" y2="21" />
-            <rect x="15" y="4" width="7" height="16" rx="2" />
-          </svg>
-        </button>
       </div>
 
       {/* Post-action prompt */}

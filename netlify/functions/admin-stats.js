@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { rateLimit, checkOrigin } from './rateLimit.js';
 import { authenticateAdmin } from './auth.js';
 import { withSentry, captureException } from './_sentry.js';
+import { withCors } from './_cors.js';
 
 let supabase;
 function getClient() {
@@ -228,4 +229,4 @@ async function adminStatsHandler(event) {
   }
 }
 
-export const handler = withSentry(adminStatsHandler);
+export const handler = withCors(withSentry(adminStatsHandler));

@@ -11,7 +11,7 @@ const DSN = 'https://df7f6b723c5cc3f491c2303e73cf43e9@o4511186341658625.ingest.u
 // eslint-disable-next-line no-undef
 const BUILD_VERSION = typeof __BUILD_VERSION__ !== 'undefined' ? __BUILD_VERSION__ : 'dev';
 
-// Errors we drop before sending. These are all expected noise for IdentityHide
+// Errors we drop before sending. These are all expected noise for Redact.ID
 // specifically — they either represent user actions (cancel), browser quirks
 // (ResizeObserver), known-and-surfaced conditions (storage full), or things we
 // can't do anything about (third-party extensions).
@@ -44,7 +44,7 @@ const DENY_URLS = [
  * Strip anything from an event that could leak user content. Called by Sentry
  * right before transport.
  *
- * Key concerns for IdentityHide:
+ * Key concerns for Redact.ID:
  *  - Pasted images arrive as blob: URLs. Don't send request.url at all.
  *  - File names ("family-vacation-2024.jpg") are PII. Don't leak them.
  *  - Canvas content must never appear — our pipeline doesn't log base64 but

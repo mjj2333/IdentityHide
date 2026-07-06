@@ -1,20 +1,28 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { usePipeline } from '../context/PipelineContext';
 import { useMaskEditor } from '../hooks/useMaskEditor';
 import { useImagePipeline } from '../hooks/useImagePipeline';
 import { useZoomPan } from '../hooks/useZoomPan';
 import { useCoachMarks, suppressAllWalkthroughs } from '../hooks/useCoachMarks';
 import { testConnection } from '../utils/comfyuiApi';
-import { applyMaskedBlur, stackBlur, BLUR_MODE_LABELS } from '../utils/blurEngine';
+import { applyMaskedBlur, stackBlur, BLUR_MODE_LABELS, BAR_STYLES } from '../utils/blurEngine';
+import ColorSpectrumPicker from './ColorSpectrumPicker';
 import { track } from '../utils/analytics';
 import ScreenShell from './ScreenShell';
 import ConfirmModal from './ConfirmModal';
 import CoachMark from './CoachMark';
 import InsetZoom from './InsetZoom';
 import { ProgressOverlay, ErrorOverlay } from './ApplyOverlay';
-import { showRewardedAd } from '../utils/rewardedAd';
-import { showClickadillaInterstitial, preloadAd } from '../utils/clickadillaAd';
-import { loadAdsterraPopunder } from '../utils/adsterraAd';
+// Ad utilities are lazy-imported at the call sites below. All three networks
+// (clickadilla / adsterra / applixir-via-paywall) are either disabled or
+// only invoked deep in user flows, so eagerly bundling them into the
+// MaskEditorScreen chunk wastes ~12-15KB of first-render JS for ~90% of
+// sessions that never trigger an ad.
+import { useEntitlement } from '../context/EntitlementContext';
+import { canConsumeCredit, consumeCredit } from '../utils/credits';
+import PaywallModal from './PaywallModal';
+import RedeemCodeModal from './RedeemCodeModal';
 
 
 export default function MaskEditorScreen() {
@@ -32,6 +40,7 @@ export default function MaskEditorScreen() {
     setScreen,
     reset,
     tattooMaskDirtyRef,
+    tattooCreditClaimedRef,
     editorReturnMode, setEditorReturnMode,
   } = usePipeline();
 
@@ -44,6 +53,9 @@ export default function MaskEditorScreen() {
   const [applyStatus, setApplyStatus] = useState('');
   const [applyProgress, setApplyProgress] = useState(0);
   const [applyError, setApplyError] = useState(null);
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [showRedeem, setShowRedeem] = useState(false);
+  const { premium, syncCreditState } = useEntitlement();
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef(null);
   const abortRef = useRef(null);
@@ -54,8 +66,11 @@ export default function MaskEditorScreen() {
   // pattern.
   const mountedRef = useRef(true);
   useEffect(() => {
-    preloadAd();
-    loadAdsterraPopunder();
+    // Fire-and-forget lazy imports. Both modules guard themselves with
+    // _ENABLED feature flags, so an undefined export or a module load
+    // failure during transition is harmless.
+    import('../utils/clickadillaAd').then((m) => { try { m.preloadAd?.(); } catch {} });
+    import('../utils/adsterraAd').then((m) => { try { m.loadAdsterraPopunder?.(); } catch {} });
     return () => {
       clearInterval(timerRef.current);
       abortRef.current?.abort();
@@ -77,6 +92,12 @@ export default function MaskEditorScreen() {
   const blurDropdownRef = useRef(null);
   const blurTriggerRef = useRef(null);
   const [blurPickerOpen, setBlurPickerOpen] = useState(false);
+  const [barStyleMenuOpen, setBarStyleMenuOpen] = useState(false);
+  const [barColorPickerOpen, setBarColorPickerOpen] = useState(false);
+  const [barStyleMenuPos, setBarStyleMenuPos] = useState(null);
+  const barStyleMenuRef = useRef(null);
+  const barStyleTriggerRef = useRef(null);
+  const barStyleMenuElRef = useRef(null);
   const blurTabRef = useRef(null);
   const tattooTabRef = useRef(null);
   const toolbarBodyRef = useRef(null);
@@ -85,7 +106,7 @@ export default function MaskEditorScreen() {
   const isMobile = /Mobi|Android/i.test(navigator.userAgent);
 
   const COACH_STEPS = [
-    { targetRef: tattooTabRef, position: 'top', title: 'Two editing modes', body: 'Use Tattoo Removal to paint over tattoos, or Blur to hide faces. Switch between them using these tabs.' },
+    { targetRef: tattooTabRef, position: 'top', title: 'Two editing modes', body: 'Use Blur to hide faces, or Tattoo Removal to paint over tattoos. Switch between them using these tabs.' },
     { targetRef: canvasContainerRef, position: 'bottom', title: 'Paint on the canvas', body: isMobile
       ? 'Use your finger to paint over areas to protect. Pinch to zoom, two fingers to pan.'
       : 'Use your mouse to paint over areas to protect. Scroll to zoom, click and drag to pan.' },
@@ -100,9 +121,12 @@ export default function MaskEditorScreen() {
   // The previous `editorMode` derived value has been removed; check
   // `category === 'tattoo'` directly so there's only one concept to keep
   // in sync.
-  const [category, setCategory] = useState(editorReturnMode === 'faceblur' ? 'blur' : (editorReturnMode || 'tattoo'));
+  // Default category is Blur so first-time users land on the more common
+  // privacy action (face blur) rather than the paid-feature tattoo tool.
+  // When the user arrives from Review via Touch Up, `editorReturnMode` is
+  // set to whichever tab they were last on so their context is preserved.
+  const [category, setCategory] = useState(editorReturnMode === 'faceblur' ? 'blur' : (editorReturnMode || 'blur'));
   const [blurSubMode, setBlurSubMode] = useState('autoface');
-  const [shapeType, setShapeType] = useState('oval');
   useEffect(() => { if (editorReturnMode) setEditorReturnMode(null); }, [editorReturnMode, setEditorReturnMode]);
 
   // Face blur painting state
@@ -126,6 +150,14 @@ export default function MaskEditorScreen() {
       setSelectedOvalIdx(null);
     }
   }, [editDets.length, selectedOvalIdx]);
+
+  // Auto/Shape always need a real blur type for their blur objects. Freehand's
+  // "Colors" brush sets mode 'none'; normalise back to gaussian when leaving it.
+  useEffect(() => {
+    if ((blurSubMode === 'autoface' || blurSubMode === 'shape') && blurSettings.mode === 'none') {
+      setBlurSettings(s => ({ ...s, mode: 'gaussian' }));
+    }
+  }, [blurSubMode, blurSettings.mode, setBlurSettings]);
 
   const maskColor = [255, 80, 80];
   const forceRender = useCallback(() => setRenderKey(k => k + 1), []);
@@ -155,7 +187,7 @@ export default function MaskEditorScreen() {
   // each open popover so the two can't race each other — e.g. clicking inside
   // the picker no longer leaves the dropdown listener attached.
   useEffect(() => {
-    if (!blurDropdownOpen && !blurPickerOpen) return;
+    if (!blurDropdownOpen && !blurPickerOpen && !barStyleMenuOpen) return;
     const onClick = (e) => {
       if (blurDropdownOpen && blurDropdownRef.current && !blurDropdownRef.current.contains(e.target)) {
         setBlurDropdownOpen(false);
@@ -163,10 +195,15 @@ export default function MaskEditorScreen() {
       if (blurPickerOpen && blurTabRef.current && !blurTabRef.current.contains(e.target)) {
         setBlurPickerOpen(false);
       }
+      if (barStyleMenuOpen
+          && barStyleMenuRef.current && !barStyleMenuRef.current.contains(e.target)
+          && (!barStyleMenuElRef.current || !barStyleMenuElRef.current.contains(e.target))) {
+        setBarStyleMenuOpen(false);
+      }
     };
     document.addEventListener('pointerdown', onClick);
     return () => document.removeEventListener('pointerdown', onClick);
-  }, [blurDropdownOpen, blurPickerOpen]);
+  }, [blurDropdownOpen, blurPickerOpen, barStyleMenuOpen]);
 
   // Lock body scroll
   useEffect(() => {
@@ -208,6 +245,7 @@ export default function MaskEditorScreen() {
   const handleAutoDetect = useCallback(() => {
     const faceDets = detections.filter(d => d.type !== 'tattoo').map(d => ({
       ...d,
+      kind: 'blur',
       origHw: (d.bottomRight[0] - d.topLeft[0]) / 2,
       origHh: (d.bottomRight[1] - d.topLeft[1]) / 2,
     }));
@@ -221,6 +259,13 @@ export default function MaskEditorScreen() {
     }
   }, [detections]);
 
+  // True if any pixel in the mask canvas has non-zero alpha.
+  const maskHasPixels = useCallback((mask) => {
+    const d = mask.getContext('2d').getImageData(0, 0, mask.width, mask.height).data;
+    for (let i = 3; i < d.length; i += 4) { if (d[i] > 0) return true; }
+    return false;
+  }, []);
+
   // --- Blur preview for face blur mode ---
   const buildPreviewMask = useCallback((dets, mode) => {
     const src = strippedCanvasRef.current;
@@ -233,22 +278,15 @@ export default function MaskEditorScreen() {
 
     if (mode !== 'blackbar') {
       for (const det of dets) {
+        if (det.kind === 'sticker') continue; // stickers aren't blur regions
         ctx.fillStyle = 'white';
-        if (det.shape === 'rectangle') {
-          const w = (det.bottomRight[0] - det.topLeft[0]) * 1.1;
-          const h = (det.bottomRight[1] - det.topLeft[1]) * 1.1;
-          const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-          const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-          ctx.fillRect(cx - w/2, cy - h/2, w, h);
-        } else {
-          const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-          const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-          const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * 1.1;
-          const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * 1.1;
-          ctx.beginPath();
-          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
+        const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
+        const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * 1.1;
+        const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * 1.1;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
 
@@ -277,23 +315,30 @@ export default function MaskEditorScreen() {
     const src = strippedCanvasRef.current;
     if (!src) return;
     const dets = editDetsRef.current;
-    const { mode, strength } = blurSettingsRef.current;
-    const mask = buildPreviewMask(dets, mode);
-    if (!mask) return;
+    const bs = blurSettingsRef.current;
+    const { mode, strength } = bs;
+    const stickerEnabled = !!bs.stickerEnabled; // freehand color-brush flag
+    const wantBlur = mode === 'gaussian' || mode === 'pixelate';
 
-    const mCtx = mask.getContext('2d');
-    const mData = mCtx.getImageData(0, 0, mask.width, mask.height);
-    let hasMask = false;
-    for (let i = 0; i < mData.data.length; i += 4) {
-      if (mData.data[i + 3] > 0) { hasMask = true; break; }
-    }
+    // Two object kinds: blur-kind regions feed the blur mask; sticker-kind
+    // objects are stamped (each with its own params) in the engine.
+    const blurDets = dets.filter(d => d.kind !== 'sticker');
+    const stickerObjects = dets.filter(d => d.kind === 'sticker');
 
-    if (!hasMask && !(mode === 'blackbar' && dets.length > 0)) {
+    const blurMask = wantBlur ? buildPreviewMask(blurDets, 'gaussian') : null;
+    // Freehand color strokes only (an empty det list keeps just the brush canvas).
+    const freehandStickerMask = stickerEnabled ? buildPreviewMask([], 'blackbar') : null;
+
+    const hasBlur = !!blurMask && maskHasPixels(blurMask);
+    const hasSticker = stickerObjects.length > 0 || (!!freehandStickerMask && maskHasPixels(freehandStickerMask));
+
+    if (!hasBlur && !hasSticker) {
       blurPreviewRef.current = null;
     } else {
-      const bs = blurSettingsRef.current;
-      const barSettings = mode === 'blackbar' ? { width: bs.barWidth ?? 20, length: bs.barLength ?? 110, angle: bs.barAngle ?? 0 } : null;
-      blurPreviewRef.current = applyMaskedBlur(src, mask, mode, strength, dets, barSettings);
+      blurPreviewRef.current = applyMaskedBlur(
+        src, blurMask, wantBlur ? mode : 'none', strength,
+        stickerObjects, freehandStickerMask, bs.barColor || '#000000',
+      );
     }
   }, [strippedCanvasRef, buildPreviewMask]);
 
@@ -323,8 +368,15 @@ export default function MaskEditorScreen() {
     const src = strippedCanvasRef.current;
     if (!display || !src) return;
 
-    display.width = imgW;
-    display.height = imgH;
+    // Only resize the backing store when the dimensions actually change.
+    // Assigning canvas.width/height reallocates and zero-fills the entire
+    // buffer (~48 MB at 12 MP, ~96 MB at 24 MP); doing it on every pointer-move
+    // frame was a primary cause of paint lag on large images. The image is
+    // fully repainted below, so skipping the reset leaves no stale pixels.
+    if (display.width !== imgW || display.height !== imgH) {
+      display.width = imgW;
+      display.height = imgH;
+    }
     const ctx = display.getContext('2d');
 
     // Show blur preview as base if available, otherwise raw image
@@ -358,9 +410,14 @@ export default function MaskEditorScreen() {
       // image with alpha. 'source-in' recolors only the alpha-hit pixels, so
       // transparency in the mask is preserved naturally.
       const tinted = tintedMaskRef.current || document.createElement('canvas');
-      tinted.width = imgW;
-      tinted.height = imgH;
       tintedMaskRef.current = tinted;
+      // Same guard — only reallocate the tint buffer on a real size change.
+      // The clearRect below handles per-frame clearing, so this is what the
+      // "allocated once… don't thrash the allocator" comment above intended.
+      if (tinted.width !== imgW || tinted.height !== imgH) {
+        tinted.width = imgW;
+        tinted.height = imgH;
+      }
       const tCtx = tinted.getContext('2d');
       tCtx.clearRect(0, 0, imgW, imgH);
       tCtx.drawImage(maskSrc, 0, 0);
@@ -528,13 +585,15 @@ export default function MaskEditorScreen() {
     setSelectedOvalIdx(null);
   }, [isPanning]);
 
-  // --- Face region management ---
-  const handleAddRegion = useCallback(() => {
+  // --- Region / object management ---
+  // Blur object: an oval that blurs whatever's under it.
+  const handleAddBlur = useCallback(() => {
     const hw = imgW * 0.075;
-    const hh = shapeType === 'oval' ? hw * 1.3 : hw;
+    const hh = hw * 1.3;
     const cx = imgW / 2;
     const cy = imgH / 2;
     const newDet = {
+      kind: 'blur',
       topLeft: [cx - hw, cy - hh],
       bottomRight: [cx + hw, cy + hh],
       origHw: hw,
@@ -544,11 +603,39 @@ export default function MaskEditorScreen() {
       keypoints: null,
       segData: null,
       manual: true,
-      shape: shapeType,
     };
     setEditDets(prev => [...prev, newDet]);
-    track('blur_region_added', { shape: shapeType });
-  }, [imgW, imgH, shapeType, setEditDets]);
+    setSelectedOvalIdx(editDetsRef.current.length);
+    track('blur_region_added');
+  }, [imgW, imgH, setEditDets]);
+
+  // Sticker object: a placed sticker (bar / SVG silhouette) with its own
+  // style/color/size/angle, independent of any blur. Defaults pulled from the
+  // current global sticker settings (the dropdown) so "Add Sticker" matches
+  // what the toolbar shows.
+  const handleAddSticker = useCallback(() => {
+    const hw = imgW * 0.12;
+    const hh = imgW * 0.035;
+    const cx = imgW / 2;
+    const cy = imgH / 2;
+    const bs = blurSettingsRef.current;
+    const newDet = {
+      kind: 'sticker',
+      topLeft: [cx - hw, cy - hh],
+      bottomRight: [cx + hw, cy + hh],
+      origHw: hw,
+      origHh: hh,
+      manual: true,
+      barStyle: bs.barStyle || 'solid',
+      barColor: bs.barColor || '#000000',
+      barWidth: 100,
+      barLength: 100,
+      barAngle: 0,
+    };
+    setEditDets(prev => [...prev, newDet]);
+    setSelectedOvalIdx(editDetsRef.current.length);
+    track('sticker_added', { style: newDet.barStyle });
+  }, [imgW, imgH, setEditDets]);
 
   const handleRemoveFace = useCallback((index) => {
     setEditDets(prev => prev.filter((_, i) => i !== index));
@@ -651,19 +738,44 @@ export default function MaskEditorScreen() {
 
   // --- Apply & Skip ---
   const handleApply = useCallback(async () => {
+    // Fast path: if the tattoo mask has never been painted on, hasTattoo is
+    // definitely false and we skip the ~W×H pixel scan. At Original tier
+    // (multi-MP) this saves 150-300ms on every face-blur-only Apply, which
+    // is by far the most common path. We only fall back to the full scan
+    // when the dirty ref is true (the user painted something), because an
+    // erase-to-empty leaves the ref true but the pixels gone.
     const hasTattoo = (() => {
+      if (!tattooMaskDirtyRef?.current) return false;
       const m = tattooMaskCanvasRef.current;
       if (!m) return false;
       const d = m.getContext('2d').getImageData(0, 0, m.width, m.height).data;
       for (let i = 3; i < d.length; i += 4) { if (d[i] > 128) return true; }
       return false;
     })();
-    // Ad gates — only for tattoo removal, skip silently on error
-    if (hasTattoo) {
-      try { await showRewardedAd(); } catch { /* let user through */ }
-      try { showClickadillaInterstitial(); } catch { /* non-blocking */ }
+
+    // Entitlement gate (free users only — premium bypasses all ad + credit logic).
+    if (!premium) {
+      // Tattoo removal consumes a weekly credit; block + paywall if depleted.
+      // Skip the credit check entirely when the current pipeline session has
+      // already claimed one — re-touching the same photo must not re-charge.
+      const needsNewCredit = hasTattoo && !tattooCreditClaimedRef?.current;
+      if (needsNewCredit && !canConsumeCredit()) {
+        track('subscription_gated', { surface: 'tattoo_credit' });
+        setShowPaywall(true);
+        return;
+      }
+      // Interstitial on the 2nd+ Apply of this session. First Apply is free
+      // of ads so users aren't hit immediately on their first interaction.
+      const prior = Number(sessionStorage.getItem('ih_apply_count_session') || 0);
+      if (prior >= 1) {
+        import('../utils/clickadillaAd').then((m) => {
+          try { m.showClickadillaInterstitial?.(); } catch { /* non-blocking */ }
+        });
+      }
+      try { sessionStorage.setItem('ih_apply_count_session', String(prior + 1)); } catch {}
     }
-    track('apply_clicked', { has_tattoo_mask: hasTattoo, face_regions: editDetsRef.current.length });
+
+    track('apply_clicked', { has_tattoo_mask: hasTattoo, face_regions: editDetsRef.current.length, premium });
     setApplying(true);
     setApplyStatus('Preparing...');
     setApplyProgress(0);
@@ -673,7 +785,12 @@ export default function MaskEditorScreen() {
     timerRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
     abortRef.current = new AbortController();
     try {
-      await recompositeWithCustomMask(tattooMaskCanvasRef.current, {
+      // Pass null when we already know the mask is empty — that skips
+      // recompositeWithCustomMask's own O(W×H) scan (it only runs on a
+      // truthy customTattooMask). When hasTattoo is true we pass the
+      // canvas and let the pipeline do its normal check.
+      const maskArg = hasTattoo ? tattooMaskCanvasRef.current : null;
+      await recompositeWithCustomMask(maskArg, {
         // Painted face regions are applied downstream in ReviewScreen, not
         // here — skip the BlazeFace auto-pass to avoid double-blurring.
         faceAutoBlur: false,
@@ -684,6 +801,16 @@ export default function MaskEditorScreen() {
         },
       });
       clearInterval(timerRef.current);
+      // Credit consumption happens HERE (after successful queue+result) so a
+      // network error, user-abort, or retouch-of-already-paid-photo doesn't
+      // burn a credit. The per-session flag gates re-Apply within the same
+      // pipeline session to a single charge.
+      if (!premium && hasTattoo && !tattooCreditClaimedRef?.current) {
+        consumeCredit();
+        if (tattooCreditClaimedRef) tattooCreditClaimedRef.current = true;
+        syncCreditState();
+        track('credit_consumed');
+      }
       tattooMaskDirtyRef.current = false;
       setScreen('review');
     } catch (err) {
@@ -713,7 +840,7 @@ export default function MaskEditorScreen() {
       setApplyError(friendly);
       setApplying(false);
     }
-  }, [recompositeWithCustomMask, tattooMaskCanvasRef, setScreen, tattooMaskDirtyRef]);
+  }, [recompositeWithCustomMask, tattooMaskCanvasRef, setScreen, tattooMaskDirtyRef, tattooCreditClaimedRef, premium, syncCreditState]);
 
   const handleSkip = useCallback(() => {
     track('skip_clicked');
@@ -782,7 +909,7 @@ export default function MaskEditorScreen() {
   }, []);
 
   const progressOverlay = applying ? (
-    <ProgressOverlay progress={applyProgress} elapsed={elapsed} onCancel={handleCancelApply} />
+    <ProgressOverlay progress={applyProgress} elapsed={elapsed} onCancel={handleCancelApply} showTips={premium} />
   ) : null;
 
   const errorOverlay = applyError ? (
@@ -814,7 +941,9 @@ export default function MaskEditorScreen() {
       })();
       if (!hasTattoo) { handleSkip(); return; }
       // Fire ad even when ComfyUI is down — the user intended to process
-      try { showClickadillaInterstitial(); } catch { /* non-blocking */ }
+      import('../utils/clickadillaAd').then((m) => {
+        try { m.showClickadillaInterstitial?.(); } catch { /* non-blocking */ }
+      });
       // Server down but user has a tattoo mask — confirm before discarding it
       setShowOfflineConfirm(true);
       return;
@@ -822,151 +951,246 @@ export default function MaskEditorScreen() {
     handleApply();
   }, [comfyConnected, handleApply, handleSkip, tattooMaskCanvasRef, tattooMaskDirtyRef, inpaintedCanvasRef]);
 
-  // Blur dropdown helper (shared between shape and freehand)
+  // Blur-style selector — 3 segmented buttons (Gaussian / Pixelate / Bar).
+  // The "Bar" segment is itself a dropdown showing the active bar style
+  // (e.g. "Marker ▾") when bar mode is selected. Tapping it toggles a
+  // popover of 5 style options. When bar mode is active, an inline color
+  // picker appears next to the segmented control.
+  // Blur type + current-sticker selector. Gaussian / Pixelate pick the blur
+  // TYPE (always one active in Auto/Shape — blur on/off is now per blur object).
+  // The Stickers dropdown picks the style/color of the SELECTED sticker, or the
+  // default for the next "Add Sticker" when nothing is selected. Freehand keeps
+  // its exclusive brush picker (Gaussian / Pixelate / Colors).
+  const isFreehand = blurSubMode === 'freehand';
+  const selectedDet = selectedOvalIdx !== null ? editDets[selectedOvalIdx] : null;
+  const selectedSticker = selectedDet && selectedDet.kind === 'sticker' ? selectedDet : null;
+  const stickerOn = !!blurSettings.stickerEnabled; // freehand color-brush flag
+  const curStickerStyle = selectedSticker ? (selectedSticker.barStyle || 'solid') : (blurSettings.barStyle || 'solid');
+  const curStickerColor = selectedSticker ? (selectedSticker.barColor || '#000000') : (blurSettings.barColor || '#000000');
+  const activeBarStyle = BAR_STYLES.find((s) => s.key === curStickerStyle) || BAR_STYLES[0];
+  const barLabel = isFreehand ? 'Stickers' : activeBarStyle.label;
+
+  // Apply a sticker patch to the selected sticker (if any) AND remember it as
+  // the default for the next Add Sticker.
+  const updateSelectedSticker = (patch) => {
+    if (selectedSticker) {
+      setEditDets((prev) => prev.map((d, i) => (i === selectedOvalIdx ? { ...d, ...patch } : d)));
+    }
+    setBlurSettings((s) => ({ ...s, ...patch }));
+  };
+
   const blurDropdownJSX = (
-    <div className="blur-dropdown" ref={blurDropdownRef}>
-      <button
-        ref={blurTriggerRef}
-        className="blur-dropdown-trigger"
-        onClick={() => {
-          setBlurDropdownOpen(v => {
-            if (!v && blurTriggerRef.current) {
-              const rect = blurTriggerRef.current.getBoundingClientRect();
-              const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-              const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
-              const nextLeft = Math.max(12, Math.min(rect.left, viewportWidth - rect.width - 12));
-              setBlurDropdownPos({
-                bottom: viewportHeight - rect.top + 6,
-                left: nextLeft,
-                minWidth: rect.width,
+    <div className="blur-style-row" role="radiogroup" aria-label="Blur style">
+      {[
+        { value: 'gaussian', label: 'Gaussian' },
+        { value: 'pixelate', label: 'Pixelate' },
+      ].map((opt) => {
+        const isSelected = blurSettings.mode === opt.value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            role="radio"
+            aria-checked={isSelected}
+            className={`blur-style-btn${isSelected ? ' is-selected' : ''}`}
+            onClick={() => {
+              setBarStyleMenuOpen(false);
+              setBlurSettings(prev => isFreehand
+                // Freehand: blur and color brush are mutually exclusive.
+                ? { ...prev, mode: opt.value, stickerEnabled: false }
+                // Auto/Shape: just the blur type (always one active).
+                : { ...prev, mode: opt.value });
+              track('blur_mode_changed', { mode: opt.value });
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+      {/* Stickers segment. Outside Freehand it opens a dropdown to pick the
+          style/color of the selected sticker (or the default for the next Add
+          Sticker). In Freehand it's a direct "Colors" picker for the brush. */}
+      <div className="bar-style-menu-wrap" ref={barStyleMenuRef}>
+        {isFreehand ? (
+          <button
+            ref={barStyleTriggerRef}
+            type="button"
+            role="radio"
+            aria-checked={stickerOn}
+            className={`blur-style-btn bar-style-trigger${stickerOn ? ' is-selected' : ''}`}
+            onClick={() => {
+              // Freehand: choosing a color switches the painted stroke to the
+              // sticker (color) effect and turns the blur off (exclusive).
+              setBlurSettings((prev) => ({ ...prev, mode: 'none', stickerEnabled: true }));
+              setBarColorPickerOpen(true);
+            }}
+          >
+            <span>Colors</span>
+            <span className="bar-style-trigger-swatch" style={{ background: curStickerColor }} aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            ref={barStyleTriggerRef}
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={barStyleMenuOpen}
+            className={`blur-style-btn bar-style-trigger${selectedSticker ? ' is-selected' : ''}`}
+            onClick={() => {
+              setBarStyleMenuOpen((v) => {
+                const next = !v;
+                if (next && barStyleTriggerRef.current) {
+                  const r = barStyleTriggerRef.current.getBoundingClientRect();
+                  setBarStyleMenuPos({ left: r.left, bottom: window.innerHeight - r.top + 4 });
+                }
+                return next;
               });
-            }
-            return !v;
-          });
-        }}
-        aria-expanded={blurDropdownOpen}
-        aria-haspopup="listbox"
-      >
-        <span>{BLUR_MODE_LABELS[blurSettings.mode]}</span>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <polyline points={blurDropdownOpen ? '18 15 12 9 6 15' : '6 9 12 15 18 9'} />
-        </svg>
-      </button>
-      {blurDropdownOpen && blurDropdownPos && (
-        <div className="blur-dropdown-menu" role="listbox"
-          style={{ bottom: blurDropdownPos.bottom, left: blurDropdownPos.left, minWidth: blurDropdownPos.minWidth }}>
-          {[
-            { value: 'gaussian', label: 'Gaussian' },
-            { value: 'pixelate', label: 'Pixelate' },
-            { value: 'blackbar', label: 'Black Bar' },
-          ].map(opt => (
+            }}
+          >
+            <span>{barLabel}</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        )}
+        {barStyleMenuOpen && barStyleMenuPos && createPortal(
+          <div
+            ref={barStyleMenuElRef}
+            className="bar-style-menu"
+            role="menu"
+            aria-label="Sticker style"
+            style={{ left: barStyleMenuPos.left, bottom: barStyleMenuPos.bottom }}
+          >
             <button
-              key={opt.value}
-              className={`blur-dropdown-item${blurSettings.mode === opt.value ? ' active' : ''}`}
-              role="option"
-              aria-selected={blurSettings.mode === opt.value}
+              type="button"
+              role="menuitem"
+              className="bar-style-menu-item bar-style-menu-color"
               onClick={() => {
-                setBlurSettings(prev => ({ ...prev, mode: opt.value }));
-                track('blur_mode_changed', { mode: opt.value });
-                setBlurDropdownOpen(false);
+                setBarStyleMenuOpen(false);
+                setBarColorPickerOpen(true);
               }}
             >
-              {opt.label}
+              <span className="bar-style-menu-swatch" style={{ background: curStickerColor }} aria-hidden="true" />
+              <span>Color…</span>
             </button>
-          ))}
-        </div>
-      )}
+            <div className="bar-style-menu-divider" role="separator" />
+            {BAR_STYLES.map((s) => {
+              const sel = curStickerStyle === s.key;
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={sel}
+                  className={`bar-style-menu-item${sel ? ' is-active' : ''}`}
+                  onClick={() => {
+                    updateSelectedSticker({ barStyle: s.key });
+                    setBarStyleMenuOpen(false);
+                    track('sticker_changed', { barStyle: s.key });
+                  }}
+                >
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )}
+      </div>
     </div>
   );
 
-  const blurAdjustmentsRow = blurSettings.mode === 'blackbar' ? (
+  // Blur sliders (Strength + Feather) show when a blur layer is active; the
+  // sticker sliders (Width / Length / Angle) show when stickers are on. Both
+  // sets can appear together when blur + stickers are combined.
+  const wantBlurControls = blurSettings.mode === 'gaussian' || blurSettings.mode === 'pixelate';
+  const blurAdjustmentsRow = (
     <>
       <div className="toolbar-row">
         <div className="toolbar-group toolbar-group-dropdown">
           {blurDropdownJSX}
         </div>
-        <div className="toolbar-group toolbar-group-slider">
-          <label className="toolbar-slider">
-            <span>Width</span>
-            <input
-              type="range"
-              min="5"
-              max="80"
-              value={blurSettings.barWidth}
-              onChange={(e) => { setBlurSettings(prev => ({ ...prev, barWidth: parseInt(e.target.value, 10) }));}}
-            />
-          </label>
-        </div>
-        <div className="toolbar-group toolbar-group-slider">
-          <label className="toolbar-slider">
-            <span>Length</span>
-            <input
-              type="range"
-              min="50"
-              max="200"
-              value={blurSettings.barLength}
-              onChange={(e) => { setBlurSettings(prev => ({ ...prev, barLength: parseInt(e.target.value, 10) }));}}
-            />
-          </label>
-        </div>
+        {wantBlurControls && (
+          <>
+            <div className="toolbar-group toolbar-group-slider">
+              <label className="toolbar-slider">
+                <span>Blur Strength</span>
+                <input
+                  type="range"
+                  min="5"
+                  max="60"
+                  value={blurSettings.strength}
+                  onChange={(e) => { setBlurSettings(prev => ({ ...prev, strength: parseInt(e.target.value, 10) }));}}
+                />
+              </label>
+            </div>
+            <div className="toolbar-group toolbar-group-slider">
+              <label className="toolbar-slider">
+                <span>Feather</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="60"
+                  value={feather}
+                  onChange={(e) => { setFeather(parseInt(e.target.value, 10));}}
+                />
+              </label>
+            </div>
+          </>
+        )}
       </div>
-      <div className="toolbar-row">
-        <div className="toolbar-group toolbar-group-slider toolbar-group-fill">
-          <label className="toolbar-slider">
-            <span>Angle</span>
-            <input
-              type="range"
-              min="-45"
-              max="45"
-              value={blurSettings.barAngle}
-              onChange={(e) => { setBlurSettings(prev => ({ ...prev, barAngle: parseInt(e.target.value, 10) }));}}
-            />
-          </label>
+      {selectedSticker && (
+        <div className="toolbar-row">
+          <div className="toolbar-group toolbar-group-slider">
+            <label className="toolbar-slider">
+              <span>Width</span>
+              <input
+                type="range"
+                min="10"
+                max="100"
+                value={selectedSticker.barWidth ?? 100}
+                onChange={(e) => updateSelectedSticker({ barWidth: parseInt(e.target.value, 10) })}
+              />
+            </label>
+          </div>
+          <div className="toolbar-group toolbar-group-slider">
+            <label className="toolbar-slider">
+              <span>Length</span>
+              <input
+                type="range"
+                min="10"
+                max="100"
+                value={selectedSticker.barLength ?? 100}
+                onChange={(e) => updateSelectedSticker({ barLength: parseInt(e.target.value, 10) })}
+              />
+            </label>
+          </div>
+          <div className="toolbar-group toolbar-group-slider">
+            <label className="toolbar-slider">
+              <span>Angle</span>
+              <input
+                type="range"
+                min="-45"
+                max="45"
+                value={selectedSticker.barAngle ?? 0}
+                onChange={(e) => updateSelectedSticker({ barAngle: parseInt(e.target.value, 10) })}
+              />
+            </label>
+          </div>
         </div>
-      </div>
+      )}
     </>
-  ) : (
-    <div className="toolbar-row">
-      <div className="toolbar-group toolbar-group-dropdown">
-        {blurDropdownJSX}
-      </div>
-      <div className="toolbar-group toolbar-group-slider">
-        <label className="toolbar-slider">
-          <span>Blur Strength</span>
-          <input
-            type="range"
-            min="5"
-            max="60"
-            value={blurSettings.strength}
-            onChange={(e) => { setBlurSettings(prev => ({ ...prev, strength: parseInt(e.target.value, 10) }));}}
-          />
-        </label>
-      </div>
-      <div className="toolbar-group toolbar-group-slider">
-        <label className="toolbar-slider">
-          <span>Feather</span>
-          <input
-            type="range"
-            min="0"
-            max="60"
-            value={feather}
-            onChange={(e) => { setFeather(parseInt(e.target.value, 10));}}
-          />
-        </label>
-      </div>
-    </div>
   );
 
   const selectedBlurRegionRow = selectedOvalIdx !== null && editDets[selectedOvalIdx] ? (
     <div className="toolbar-row oval-resize-row">
       <div className="toolbar-group toolbar-group-inline">
         <span className="toolbar-label">
-          {blurSubMode === 'autoface' ? 'Face' : 'Region'} {selectedOvalIdx + 1}
+          {selectedSticker ? 'Sticker' : (blurSubMode === 'autoface' ? 'Face' : 'Blur')} {selectedOvalIdx + 1}
         </span>
       </div>
       <div className="toolbar-group toolbar-group-slider">
         <label className="toolbar-slider">
-          <span>{blurSubMode === 'autoface' ? 'Size' : 'Resize'}</span>
+          <span>Resize</span>
           <input
             type="range"
             min="30"
@@ -980,7 +1204,7 @@ export default function MaskEditorScreen() {
         <button
           className="tool-btn"
           onClick={() => { handleRemoveFace(selectedOvalIdx); }}
-          title={blurSubMode === 'autoface' ? 'Remove selected face' : 'Remove selected region'}
+          title="Remove selected"
         >
           Remove
         </button>
@@ -995,6 +1219,7 @@ export default function MaskEditorScreen() {
       <div className="mask-editor-toolbar-body" ref={toolbarBodyRef}>
         {category === 'tattoo' && (
           <div className="toolbar-panel mask-editor-toolbar-panel">
+            <h3 className="mode-panel-title">Tattoo Removal</h3>
             {!applying && (
               <div className="toolbar-row brush-size-row">
                 <div className="toolbar-group toolbar-group-slider toolbar-group-fill">
@@ -1018,9 +1243,8 @@ export default function MaskEditorScreen() {
                   onClick={() => setActiveTool('brush')}
                   title="Paint over tattoo areas"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                    <path d="M3.5 20.5c-1 1-2.5.5-2.5-.8 0-1.5 1.2-3.2 3-4.7l2 2c-1.5 1.8-2 3-2.5 3.5z" />
-                    <path d="M6.5 15.5L18.8 3.2c.8-.8 2-.8 2.8 0l-.3.3c.8.8.8 2 0 2.8L8.5 18l-2-2.5z" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42" />
                   </svg>
                   Brush
                 </button>
@@ -1029,7 +1253,7 @@ export default function MaskEditorScreen() {
                   onClick={() => setActiveTool('eraser')}
                   title="Erase mask areas"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 20H7L3 16l9-9 8 8-4 4" />
                     <path d="M6 11l4-4" />
                   </svg>
@@ -1039,16 +1263,14 @@ export default function MaskEditorScreen() {
 
               <div className="toolbar-group toolbar-group-buttons">
                 <button className="tool-btn" onClick={() => { undo(); tattooMaskDirtyRef.current = true; forceRender(); }} disabled={!canUndo} title="Undo" aria-label="Undo">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="1 4 1 10 7 10" />
-                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3" />
                   </svg>
                   {undoCount > 0 && <span className="tool-badge">{undoCount}</span>}
                 </button>
                 <button className="tool-btn" onClick={() => { redo(); tattooMaskDirtyRef.current = true; forceRender(); }} disabled={!canRedo} title="Redo" aria-label="Redo">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="23 4 23 10 17 10" />
-                    <path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M15 15l6-6m0 0-6-6m6 6H9a6 6 0 0 0 0 12h3" />
                   </svg>
                   {redoCount > 0 && <span className="tool-badge">{redoCount}</span>}
                 </button>
@@ -1069,26 +1291,16 @@ export default function MaskEditorScreen() {
       {/* Blur category */}
         {category === 'blur' && blurSubMode === 'shape' && (
           <div className="toolbar-panel mask-editor-toolbar-panel">
+            <h3 className="mode-panel-title">Shape Blur</h3>
             {blurAdjustmentsRow}
             {selectedBlurRegionRow}
             <div className="toolbar-row">
               <div className="toolbar-group toolbar-group-buttons">
-                <div className="shape-toggle">
-                  <button className={`shape-toggle-btn${shapeType === 'oval' ? ' active' : ''}`}
-                    onClick={() => setShapeType('oval')}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="12" rx="10" ry="7"/></svg>
-                    Oval
-                  </button>
-                  <button className={`shape-toggle-btn${shapeType === 'rectangle' ? ' active' : ''}`}
-                    onClick={() => setShapeType('rectangle')}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="5" width="18" height="14" rx="2"/></svg>
-                    Rectangle
-                  </button>
-                </div>
-              </div>
-              <div className="toolbar-group toolbar-group-inline">
-                <button className="tool-btn" onClick={handleAddRegion} title="Add a blur region">
-                  + Add
+                <button className="tool-btn" onClick={handleAddBlur} title="Add a blur region">
+                  + Add Blur
+                </button>
+                <button className="tool-btn" onClick={handleAddSticker} title="Add a sticker">
+                  + Add Sticker
                 </button>
               </div>
             </div>
@@ -1097,20 +1309,21 @@ export default function MaskEditorScreen() {
 
         {category === 'blur' && blurSubMode === 'autoface' && (
           <div className="toolbar-panel mask-editor-toolbar-panel">
+            <h3 className="mode-panel-title">Auto Blur</h3>
             {blurAdjustmentsRow}
             {selectedBlurRegionRow}
             <div className="toolbar-row">
               <div className="toolbar-group toolbar-group-buttons">
                 <button className="tool-btn" onClick={handleAutoDetect} title="Auto-detect faces in the image">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="10" r="6" />
-                    <path d="M8 10h.01M16 10h.01" />
-                    <path d="M9 13c.5.8 1.5 1 3 1s2.5-.2 3-1" />
-                    <path d="M2 21v-1a7 7 0 0 1 7-7h6a7 7 0 0 1 7 7v1" />
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
                   </svg>
                   Detect Faces
                 </button>
-                <button className="tool-btn" onClick={handleClearFaces} title="Clear all face blur regions">
+                <button className="tool-btn" onClick={handleAddSticker} title="Add a sticker">
+                  + Add Sticker
+                </button>
+                <button className="tool-btn" onClick={handleClearFaces} title="Clear all blur regions">
                   Clear All
                 </button>
               </div>
@@ -1120,6 +1333,7 @@ export default function MaskEditorScreen() {
 
         {category === 'blur' && blurSubMode === 'freehand' && (
           <div className="toolbar-panel mask-editor-toolbar-panel">
+            <h3 className="mode-panel-title">Freehand Blur</h3>
             <div className="toolbar-row brush-size-row">
               <div className="toolbar-group toolbar-group-dropdown">
                 {blurDropdownJSX}
@@ -1137,50 +1351,7 @@ export default function MaskEditorScreen() {
                 </label>
               </div>
             </div>
-            {blurSettings.mode === 'blackbar' ? (
-              <>
-                <div className="toolbar-row">
-                  <div className="toolbar-group toolbar-group-slider">
-                    <label className="toolbar-slider">
-                      <span>Width</span>
-                      <input
-                        type="range"
-                        min="5"
-                        max="80"
-                        value={blurSettings.barWidth}
-                        onChange={(e) => { setBlurSettings(prev => ({ ...prev, barWidth: parseInt(e.target.value, 10) }));}}
-                      />
-                    </label>
-                  </div>
-                  <div className="toolbar-group toolbar-group-slider">
-                    <label className="toolbar-slider">
-                      <span>Length</span>
-                      <input
-                        type="range"
-                        min="50"
-                        max="200"
-                        value={blurSettings.barLength}
-                        onChange={(e) => { setBlurSettings(prev => ({ ...prev, barLength: parseInt(e.target.value, 10) }));}}
-                      />
-                    </label>
-                  </div>
-                </div>
-                <div className="toolbar-row">
-                  <div className="toolbar-group toolbar-group-slider toolbar-group-fill">
-                    <label className="toolbar-slider">
-                      <span>Angle</span>
-                      <input
-                        type="range"
-                        min="-45"
-                        max="45"
-                        value={blurSettings.barAngle}
-                        onChange={(e) => { setBlurSettings(prev => ({ ...prev, barAngle: parseInt(e.target.value, 10) }));}}
-                      />
-                    </label>
-                  </div>
-                </div>
-              </>
-            ) : (
+            {wantBlurControls && (
               <div className="toolbar-row">
                 <div className="toolbar-group toolbar-group-slider">
                   <label className="toolbar-slider">
@@ -1215,9 +1386,8 @@ export default function MaskEditorScreen() {
                   onClick={() => setFaceBlurTool('brush')}
                   title="Paint blur regions freehand"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                    <path d="M3.5 20.5c-1 1-2.5.5-2.5-.8 0-1.5 1.2-3.2 3-4.7l2 2c-1.5 1.8-2 3-2.5 3.5z" />
-                    <path d="M6.5 15.5L18.8 3.2c.8-.8 2-.8 2.8 0l-.3.3c.8.8.8 2 0 2.8L8.5 18l-2-2.5z" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42" />
                   </svg>
                   Paint
                 </button>
@@ -1226,7 +1396,7 @@ export default function MaskEditorScreen() {
                   onClick={() => setFaceBlurTool('eraser')}
                   title="Erase painted blur regions"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 20H7L3 16l9-9 8 8-4 4" />
                     <path d="M6 11l4-4" />
                   </svg>
@@ -1244,16 +1414,10 @@ export default function MaskEditorScreen() {
 
       </div>
 
-      {/* Level 1: Category tabs (bottom of toolbar) */}
+      {/* Level 1: Category tabs (bottom of toolbar).
+          Blur (with sub-mode picker chevron) sits on the LEFT, Tattoo
+          Removal on the RIGHT — matches the Redact.ID home artboard. */}
       <div className="toolbar-tabs">
-        <button ref={tattooTabRef} className={`toolbar-tab${category === 'tattoo' ? ' active' : ''}`}
-          onClick={() => { setCategory('tattoo'); setBlurPickerOpen(false); }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3.5 20.5c-1 1-2.5.5-2.5-.8 0-1.5 1.2-3.2 3-4.7l2 2c-1.5 1.8-2 3-2.5 3.5z" />
-            <path d="M6.5 15.5L18.8 3.2c.8-.8 2-.8 2.8 0l-.3.3c.8.8.8 2 0 2.8L8.5 18l-2-2.5z" />
-          </svg>
-          Tattoo Removal
-        </button>
         <div className="toolbar-tab-wrapper" ref={blurTabRef}>
           <button className={`toolbar-tab${category === 'blur' ? ' active' : ''}`}
             onClick={() => {
@@ -1263,11 +1427,8 @@ export default function MaskEditorScreen() {
                 setBlurPickerOpen(v => !v);
               }
             }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-              <line x1="9" y1="9" x2="9.01" y2="9" />
-              <line x1="15" y1="9" x2="15.01" y2="9" />
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             </svg>
             {{ autoface: 'Auto Blur', shape: 'Shape Blur', freehand: 'Freehand Blur' }[blurSubMode]}
             <svg className={`blur-tab-chevron${category === 'blur' ? ' active' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -1278,18 +1439,16 @@ export default function MaskEditorScreen() {
             <div className="blur-mode-picker">
               {[
                 { value: 'autoface', label: 'Auto Blur', icon: (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="10" r="6" />
-                    <path d="M9 9h.01M15 9h.01" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5m0 9V18A2.25 2.25 0 0 1 18 20.25h-1.5m-9 0H6A2.25 2.25 0 0 1 3.75 18v-1.5M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                   </svg>
                 )},
                 { value: 'shape', label: 'Shape Blur', icon: (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="12" rx="10" ry="7"/></svg>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="12" rx="9" ry="6"/></svg>
                 )},
                 { value: 'freehand', label: 'Freehand Blur', icon: (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                    <path d="M3.5 20.5c-1 1-2.5.5-2.5-.8 0-1.5 1.2-3.2 3-4.7l2 2c-1.5 1.8-2 3-2.5 3.5z" />
-                    <path d="M6.5 15.5L18.8 3.2c.8-.8 2-.8 2.8 0l-.3.3c.8.8.8 2 0 2.8L8.5 18l-2-2.5z" />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42" />
                   </svg>
                 )},
               ].map(opt => (
@@ -1310,6 +1469,13 @@ export default function MaskEditorScreen() {
             </div>
           )}
         </div>
+        <button ref={tattooTabRef} className={`toolbar-tab${category === 'tattoo' ? ' active' : ''}`}
+          onClick={() => { setCategory('tattoo'); setBlurPickerOpen(false); }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
+          </svg>
+          Tattoo Removal
+        </button>
       </div>
     </div>
   );
@@ -1354,13 +1520,13 @@ export default function MaskEditorScreen() {
               ref={displayRef}
               className="mask-editor-canvas"
               aria-label="Mask editor canvas"
-              style={{ cursor: 'none', touchAction: 'none' }}
+              style={{ cursor: showBrushCursor ? 'none' : undefined, touchAction: 'none' }}
               onPointerDown={category === 'tattoo' ? onTattooDown : (blurSubMode === 'freehand' ? onFaceBlurDown : onShapeCanvasDown)}
             />
             {editDets.map((det, i) => (
               <div
                 key={`face-${i}`}
-                className={`face-overlay${selectedOvalIdx === i ? ' selected' : ''}${det.shape === 'rectangle' ? ' rectangle' : ''}`}
+                className={`face-overlay${selectedOvalIdx === i ? ' selected' : ''}${det.kind === 'sticker' ? ' sticker-overlay' : ''}`}
                 style={{
                   position: 'absolute',
                   left: `${(det.topLeft[0] / imgW) * 100}%`,
@@ -1462,6 +1628,38 @@ export default function MaskEditorScreen() {
           onDismissAll={() => { suppressAllWalkthroughs(); coachMarks.dismiss(); }}
         />
       )}
+
+      {showPaywall && (
+        <PaywallModal
+          onClose={() => setShowPaywall(false)}
+          onEarnedCredit={() => {
+            syncCreditState();
+            setShowPaywall(false);
+            // Re-trigger the Apply the user was blocked from — they already
+            // had a mask ready when the paywall popped.
+            handleApply();
+          }}
+          onRedeemClick={() => {
+            setShowPaywall(false);
+            setShowRedeem(true);
+          }}
+        />
+      )}
+
+      {showRedeem && (
+        <RedeemCodeModal
+          onClose={() => setShowRedeem(false)}
+          onSuccess={() => setShowRedeem(false)}
+        />
+      )}
+
+      <ColorSpectrumPicker
+        open={barColorPickerOpen}
+        value={curStickerColor}
+        onChange={(hex) => updateSelectedSticker({ barColor: hex })}
+        onClose={() => setBarColorPickerOpen(false)}
+        ariaLabel="Sticker color"
+      />
     </ScreenShell>
   );
 }

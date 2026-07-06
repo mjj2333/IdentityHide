@@ -2,8 +2,9 @@
  * Progress overlay shown during ComfyUI processing,
  * and error overlay with retry/skip/dismiss on failure.
  */
+import DidYouKnowTip from './DidYouKnowTip';
 
-export function ProgressOverlay({ progress, elapsed, onCancel }) {
+export function ProgressOverlay({ progress, elapsed, onCancel, showTips = false }) {
   const pct = Math.round(progress * 100);
   return (
     <div className="apply-overlay">
@@ -12,6 +13,7 @@ export function ProgressOverlay({ progress, elapsed, onCancel }) {
           <div className="apply-progress-fill" style={{ width: `${pct}%` }} />
         </div>
         <span className="apply-status-text">{pct}%{elapsed > 0 ? ` (${elapsed}s)` : ''}</span>
+        {showTips && elapsed >= 2 && <DidYouKnowTip />}
         <button className="btn btn-secondary btn-small" onClick={onCancel}>
           Cancel
         </button>

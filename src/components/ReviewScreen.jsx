@@ -36,7 +36,7 @@ export default function ReviewScreen() {
     { targetRef: dividerRef, position: 'bottom', title: 'Compare before & after', body: isMobile
       ? 'Slide the divider to compare the original with your protected version.'
       : 'Drag the divider to compare the original with your protected version.' },
-    { targetRef: touchUpRef, position: 'top', title: 'Need adjustments?', body: 'Tap Touch Up to go back and refine your masks.' },
+    { targetRef: touchUpRef, position: 'top', title: 'Need adjustments?', body: 'Tap Touch Up to re-open the editor and adjust further.' },
   ];
   const coachMarks = useCoachMarks('review', COACH_STEPS.length);
 
@@ -52,6 +52,10 @@ export default function ReviewScreen() {
   const [splitPos, setSplitPos] = useState(50);
   const [renderTick, setRenderTick] = useState(0);
   const [showTouchUpConfirm, setShowTouchUpConfirm] = useState(false);
+  // The metadata card is a collapsed accordion by default so the before/after
+  // compare window gets the majority of the vertical space. Users who want
+  // the full audit of which fields were stripped can expand it.
+  const [metaExpanded, setMetaExpanded] = useState(false);
 
   const editDetsRef = useRef(editDets);
   const blurSettingsRef = useRef(blurSettings);
@@ -67,25 +71,18 @@ export default function ReviewScreen() {
     mask.height = height;
     const ctx = mask.getContext('2d');
 
-    // Skip shapes for blackbar — bars are drawn directly from detections
+    // Only blur-kind regions paint into the blur mask (stickers are separate).
     if (blurMode !== 'blackbar') {
       for (const det of dets) {
+        if (det.kind === 'sticker') continue;
         ctx.fillStyle = 'white';
-        if (det.shape === 'rectangle') {
-          const w = (det.bottomRight[0] - det.topLeft[0]) * FACE_BOX_EXPAND;
-          const h = (det.bottomRight[1] - det.topLeft[1]) * FACE_BOX_EXPAND;
-          const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-          const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-          ctx.fillRect(cx - w/2, cy - h/2, w, h);
-        } else {
-          const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-          const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-          const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
-          const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
-          ctx.beginPath();
-          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-          ctx.fill();
-        }
+        const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
+        const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
+        const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
+        const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
 
@@ -94,7 +91,7 @@ export default function ReviewScreen() {
     }
 
     const fr = feather;
-    if (fr > 0) {
+    if (fr > 0 && blurMode !== 'blackbar') {
       const imgData = ctx.getImageData(0, 0, width, height);
       const d = imgData.data;
       for (let i = 0; i < d.length; i += 4) {
@@ -119,29 +116,36 @@ export default function ReviewScreen() {
     const base = inpaintedCanvasRef.current;
     if (!base) return;
 
-    const { mode, strength } = blurSettingsRef.current;
-    const mask = buildCombinedMask(dets, mode);
-    if (!mask) return;
+    const bs = blurSettingsRef.current;
+    const { mode, strength } = bs;
+    const stickerEnabled = !!bs.stickerEnabled; // freehand color-brush flag
+    const wantBlur = mode === 'gaussian' || mode === 'pixelate';
 
-    const mCtx = mask.getContext('2d');
-    const mData = mCtx.getImageData(0, 0, mask.width, mask.height);
-    let hasMask = false;
-    for (let i = 0; i < mData.data.length; i += 4) {
-      if (mData.data[i + 3] > 0) { hasMask = true; break; }
-    }
+    const hasPixels = (m) => {
+      const d = m.getContext('2d').getImageData(0, 0, m.width, m.height).data;
+      for (let i = 3; i < d.length; i += 4) { if (d[i] > 0) return true; }
+      return false;
+    };
 
-    // For blackbar, still need to draw bars even if mask is empty
-    const needsBlur = hasMask || (mode === 'blackbar' && dets.length > 0);
+    const blurDets = dets.filter(d => d.kind !== 'sticker');
+    const stickerObjects = dets.filter(d => d.kind === 'sticker');
+    const blurMask = wantBlur ? buildCombinedMask(blurDets, 'gaussian') : null;
+    const freehandStickerMask = stickerEnabled ? buildCombinedMask([], 'blackbar') : null;
 
-    if (!needsBlur) {
+    const hasBlur = !!blurMask && hasPixels(blurMask);
+    const hasSticker = stickerObjects.length > 0 || (!!freehandStickerMask && hasPixels(freehandStickerMask));
+
+    if (!hasBlur && !hasSticker) {
       const clean = document.createElement('canvas');
       clean.width = base.width;
       clean.height = base.height;
       clean.getContext('2d').drawImage(base, 0, 0);
       outputCanvasRef.current = clean;
     } else {
-      const barSettings = mode === 'blackbar' ? { width: blurSettingsRef.current.barWidth ?? 20, length: blurSettingsRef.current.barLength ?? 110, angle: blurSettingsRef.current.barAngle ?? 0 } : null;
-      outputCanvasRef.current = applyMaskedBlur(base, mask, mode, strength, dets, barSettings);
+      outputCanvasRef.current = applyMaskedBlur(
+        base, blurMask, wantBlur ? mode : 'none', strength,
+        stickerObjects, freehandStickerMask, bs.barColor || '#000000',
+      );
     }
     setRenderTick(t => t + 1);
   }, [inpaintedCanvasRef, outputCanvasRef, buildCombinedMask]);
@@ -242,16 +246,19 @@ export default function ReviewScreen() {
   }, [setScreen, setEditorReturnMode, tattooMaskCanvasRef, tattooMaskDirtyRef]);
 
   // --- Metadata report ---
+  // Each row is just a label + whether the field was present on the source.
+  // The actual values are deliberately NOT surfaced — showing the GPS
+  // coordinates or camera model even in a "this was stripped" summary
+  // undermines the point of stripping them.
   const metadataRows = metadata ? [
-    { label: 'GPS Location', value: metadata.gps ? `${metadata.gps.lat}, ${metadata.gps.lng}${metadata.gps.alt != null ? ` (${metadata.gps.alt}m)` : ''}` : null, warn: true },
-    { label: 'Camera', value: metadata.camera },
-    { label: 'Date / Time', value: metadata.dateTime },
-    { label: 'Software', value: metadata.software },
-    { label: 'Focal Length', value: metadata.focalLength },
-    { label: 'Lens', value: metadata.lens },
-    { label: 'Orientation', value: metadata.orientation != null ? `${metadata.orientation}` : null },
+    { label: 'GPS location',    present: !!metadata.gps },
+    { label: 'Camera body',     present: metadata.camera != null },
+    { label: 'Lens',            present: metadata.lens != null },
+    { label: 'Software',        present: metadata.software != null },
+    { label: 'Date / time',     present: metadata.dateTime != null },
+    { label: 'Focal length',    present: metadata.focalLength != null },
+    { label: 'Orientation',     present: metadata.orientation != null },
   ] : [];
-  const strippedRows = metadataRows.filter(r => r.value != null);
 
   return (
     <ScreenShell
@@ -307,62 +314,46 @@ export default function ReviewScreen() {
       </div>
 
       <div className="review-touch-up-area">
-        <button ref={touchUpRef} className="btn btn-secondary review-touch-up-btn" onClick={handleTouchUp}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 19l7-7 3 3-7 7-3-3z" />
-            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+        <button ref={touchUpRef} className="review-touch-up-btn" onClick={handleTouchUp}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
           </svg>
           Touch Up
         </button>
       </div>
 
       {metadata && (
-        <div className="privacy-report">
-          <div className="privacy-report-header">
-            <svg className="privacy-report-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+        <div className={`metadata-report${metaExpanded ? ' is-open' : ''}`}>
+          <button
+            type="button"
+            className="metadata-report-header"
+            onClick={() => setMetaExpanded(v => !v)}
+            aria-expanded={metaExpanded}
+            aria-controls="metadata-report-rows"
+          >
+            <svg className="metadata-report-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
             </svg>
-            <span className="privacy-report-title">
-              {strippedRows.length > 0
-                ? 'Metadata Detected & Removed'
-                : metadata.readable !== false
-                  ? 'No Metadata Detected'
-                  : 'Metadata Stripped'}
+            <h3 className="metadata-report-title">Metadata Stripped</h3>
+            <span className="metadata-report-summary">
+              {metadataRows.filter(r => r.present).length} removed
             </span>
-            <span className="privacy-report-summary">
-              {strippedRows.length > 0
-                ? `${strippedRows.length} field${strippedRows.length > 1 ? 's' : ''} stripped`
-                : 'Clean'}
-            </span>
-          </div>
-
-          <div className="privacy-report-body">
-            {strippedRows.length > 0 ? (
-              <div className="privacy-report-grid">
-                {metadataRows.map(row => (
-                  <div className={`privacy-report-row${row.value != null ? ' found' : ''}${row.warn && row.value != null ? ' warn' : ''}`} key={row.label}>
-                    <span className="privacy-report-label">{row.label}</span>
-                    <span className="privacy-report-value">
-                      {row.value != null ? row.value : 'Not present'}
-                    </span>
-                    <span className="privacy-report-status">
-                      {row.value != null ? (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-label="Stripped">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      ) : (
-                        <span className="privacy-report-dash">&mdash;</span>
-                      )}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="privacy-report-clean">
-                {metadata.note || 'No sensitive metadata found in this image. Output is clean.'}
-              </div>
-            )}
-          </div>
+            <svg className="metadata-report-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points={metaExpanded ? '18 15 12 9 6 15' : '6 9 12 15 18 9'} />
+            </svg>
+          </button>
+          {metaExpanded && (
+            <div className="metadata-report-rows" id="metadata-report-rows">
+              {metadataRows.map(row => (
+                <div className="metadata-report-row" key={row.label}>
+                  <span className="metadata-report-label">{row.label}</span>
+                  <span className={`metadata-report-status${row.present ? ' is-removed' : ''}`}>
+                    {row.present ? 'Removed' : 'Not present'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

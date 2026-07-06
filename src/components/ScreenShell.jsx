@@ -1,3 +1,5 @@
+import Wordmark from './Wordmark';
+
 export default function ScreenShell({
   backAction,
   backLabel = 'Back',
@@ -5,6 +7,11 @@ export default function ScreenShell({
   primaryLabel,
   primaryDisabled,
   primaryRef,
+  // Optional JSX rendered in the top-bar's right slot when the screen
+  // doesn't have a primary action button. Used by the batch screens to
+  // show a "X/20 photos" count where the action button would normally sit.
+  // Ignored when `primaryAction` is also set.
+  topRight,
   stepLabel,
   toolbar,
   toolbarClassName = '',
@@ -30,15 +37,16 @@ export default function ScreenShell({
           ) : null}
         </div>
         <div className="top-bar-brand">
-          <span className="brand-text">IdentityHide</span>
-          {stepLabel && <span className="brand-step-label">{stepLabel}</span>}
+          <Wordmark size="header" stepLabel={stepLabel ? stepLabel.toUpperCase() : undefined} />
         </div>
         <div className="top-bar-side top-bar-side-right">
-          {primaryAction && (
+          {primaryAction ? (
             <button ref={primaryRef} type="button" aria-label={primaryLabel || 'Continue'} className="btn btn-primary top-primary-btn" onClick={primaryAction} disabled={primaryDisabled}>
               {primaryLabel}
             </button>
-          )}
+          ) : topRight ? (
+            topRight
+          ) : null}
         </div>
       </header>
       <main className={contentClassNames}>

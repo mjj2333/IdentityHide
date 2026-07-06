@@ -1,4 +1,5 @@
 import ScreenShell from './ScreenShell';
+import { useDocumentMeta } from '../hooks/useDocumentMeta';
 
 /**
  * Terms and Conditions page.
@@ -8,6 +9,13 @@ import ScreenShell from './ScreenShell';
  * document as a binding legal agreement.
  */
 export default function TermsScreen({ onBack }) {
+  useDocumentMeta({
+    title: 'Terms of Service — Redact.ID',
+    description: 'Terms of service for Redact.ID, the in-browser photo redaction tool that blurs faces, removes tattoos, and strips location metadata.',
+    canonical: 'https://redactid.app/terms',
+    // Swap to /og/terms.png once a per-route image is designed.
+    ogImage: 'https://redactid.app/og-image.png',
+  });
   return (
     <ScreenShell backAction={onBack} backLabel="Back">
       <div className="terms-container">
@@ -17,7 +25,7 @@ export default function TermsScreen({ onBack }) {
         <section className="terms-section">
           <h2>1. Acceptance</h2>
           <p>
-            By using IdentityHide (&ldquo;the Service&rdquo;), you agree to
+            By using Redact.ID (&ldquo;the Service&rdquo;), you agree to
             these Terms. If you don&apos;t agree, please don&apos;t use the
             Service.
           </p>
@@ -26,7 +34,7 @@ export default function TermsScreen({ onBack }) {
         <section className="terms-section">
           <h2>2. What the Service Does</h2>
           <p>
-            IdentityHide is a privacy tool that helps you blur faces and remove
+            Redact.ID is a privacy tool that helps you blur faces and remove
             tattoos from images you upload. Face detection and initial
             processing run in your browser. Tattoo removal is processed on our
             servers and the image is deleted immediately after processing
@@ -113,7 +121,7 @@ export default function TermsScreen({ onBack }) {
         <section className="terms-section">
           <h2>7. No Guarantee of Anonymity</h2>
           <p>
-            IdentityHide is a privacy <strong>tool</strong>, not a guarantee.
+            Redact.ID is a privacy <strong>tool</strong>, not a guarantee.
             We do not warrant that processed images cannot be re-identified
             through other means, including but not limited to reverse image
             search, forensic analysis, distinctive body markings, background
@@ -140,7 +148,7 @@ export default function TermsScreen({ onBack }) {
         <section className="terms-section">
           <h2>9. Limitation of Liability</h2>
           <p>
-            To the maximum extent permitted by law, IdentityHide and its
+            To the maximum extent permitted by law, Redact.ID and its
             affiliates shall not be liable for any indirect, incidental,
             consequential, special, exemplary, or punitive damages arising out
             of or related to your use of the Service. This includes, without
@@ -155,7 +163,7 @@ export default function TermsScreen({ onBack }) {
         <section className="terms-section">
           <h2>10. Indemnification</h2>
           <p>
-            You agree to indemnify and hold harmless IdentityHide from any
+            You agree to indemnify and hold harmless Redact.ID from any
             claims, damages, losses, or expenses (including reasonable legal
             fees) arising out of your use of the Service, your violation of
             these Terms, or your violation of any rights of a third party.
@@ -166,7 +174,7 @@ export default function TermsScreen({ onBack }) {
           <h2>11. Intellectual Property</h2>
           <p>
             The Service, including its software, user interface, design, and
-            branding, is owned by IdentityHide and protected by applicable
+            branding, is owned by Redact.ID and protected by applicable
             intellectual property laws. You may not copy, modify,
             reverse-engineer, decompile, or redistribute any part of the
             Service without our prior written permission.

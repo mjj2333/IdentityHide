@@ -50,7 +50,7 @@ function getMenuInstruction() {
     return <>Tap the <strong>menu</strong> button <MenuIcon /> then tap <strong>&ldquo;Add to Home screen&rdquo;</strong> or <strong>&ldquo;Install app&rdquo;</strong>.</>;
   }
 
-  return <>Click the install icon in the address bar, or use the browser menu &rarr; <strong>&ldquo;Install IdentityHide&rdquo;</strong>.</>;
+  return <>Click the install icon in the address bar, or use the browser menu &rarr; <strong>&ldquo;Install Redact.ID&rdquo;</strong>.</>;
 }
 
 function ShareIcon() {
@@ -169,7 +169,7 @@ export default function InstallPrompt() {
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Install IdentityHide"
+        aria-label="Install Redact.ID"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="install-prompt-header">
@@ -177,11 +177,11 @@ export default function InstallPrompt() {
             <path d="M12 2v13M5 10l7 7 7-7" />
             <path d="M3 17v3a2 2 0 002 2h14a2 2 0 002-2v-3" />
           </svg>
-          <h2>Install IdentityHide</h2>
+          <h2>Install Redact.ID</h2>
         </div>
 
         <p className="install-prompt-body">
-          Add to your home screen to work offline. Face blur and metadata stripping run locally, so your photos never leave your device.
+          Add to your home screen for quick access. Face blur and metadata stripping run locally on your device, so they keep working even if you go offline.
         </p>
 
         {hasNativePrompt ? (

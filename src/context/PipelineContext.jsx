@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { saveSession, clearSession } from '../utils/sessionStore';
 import { getTierMP, getSavedTierKey } from '../utils/resolutionTiers';
+import { migrateBlurSettings } from '../utils/blurEngine';
 
 const PipelineContext = createContext(null);
 
@@ -10,7 +11,16 @@ export function PipelineProvider({ children }) {
   const [metadata, setMetadata] = useState(null);
   const [detections, setDetections] = useState([]);
   const [detectionToggles, setDetectionToggles] = useState([]);
-  const [blurSettings, setBlurSettings] = useState({ mode: 'gaussian', strength: 20, barWidth: 20, barLength: 110, barAngle: 0 });
+  const [blurSettings, setBlurSettings] = useState({
+    mode: 'gaussian',       // 'none' | 'gaussian' | 'pixelate' — the blur layer
+    stickerEnabled: false,  // independent sticker overlay, layers on top of the blur
+    strength: 20,
+    barWidth: 20,
+    barLength: 110,
+    barAngle: 0,
+    barStyle: 'solid',
+    barColor: '#000000',
+  });
   const [feather, setFeather] = useState(0);
   const [brushSettings, setBrushSettings] = useState({ tool: 'brush', size: 30 });
   const [status, setStatus] = useState('idle');
@@ -32,6 +42,12 @@ export function PipelineProvider({ children }) {
   const fullResCanvasRef = useRef(null);
   const faceBlurCanvasRef = useRef(null);
   const tattooMaskDirtyRef = useRef(true);
+  // Tracks whether we've already consumed a free tattoo credit for the
+  // current pipeline session (i.e. the current uploaded image). Retouching
+  // the same image after a successful Apply MUST NOT consume another credit
+  // — that would charge users for iteration, not for distinct photos. The
+  // flag is reset on reset() and at the start of every runPipeline.
+  const tattooCreditClaimedRef = useRef(false);
   const [editDets, setEditDets] = useState([]);
   const [editorReturnMode, setEditorReturnMode] = useState(null);
 
@@ -52,7 +68,7 @@ export function PipelineProvider({ children }) {
     setMetadata(null);
     setDetections([]);
     setDetectionToggles([]);
-    setBlurSettings({ mode: 'gaussian', strength: 20, barWidth: 20, barLength: 110, barAngle: 0 });
+    setBlurSettings({ mode: 'gaussian', stickerEnabled: false, strength: 20, barWidth: 20, barLength: 110, barAngle: 0, barStyle: 'solid', barColor: '#000000' });
     setFeather(0);
     setBrushSettings({ tool: 'brush', size: 30 });
     setStatus('idle');
@@ -61,6 +77,7 @@ export function PipelineProvider({ children }) {
     setSelectedTierMP(getTierMP(getSavedTierKey()));
     samScaleRef.current = null;
     tattooMaskDirtyRef.current = true;
+    tattooCreditClaimedRef.current = false;
     setEditDets([]);
     setEditorReturnMode(null);
   }, []);
@@ -111,7 +128,7 @@ export function PipelineProvider({ children }) {
 
   const restoreSession = useCallback((session) => {
     setOriginalFile(session.originalFile);
-    setBlurSettings(session.blurSettings || { mode: 'gaussian', strength: 20, barWidth: 20, barLength: 110, barAngle: 0 });
+    setBlurSettings(migrateBlurSettings(session.blurSettings) || { mode: 'gaussian', stickerEnabled: false, strength: 20, barWidth: 20, barLength: 110, barAngle: 0, barStyle: 'solid', barColor: '#000000' });
     setFeather(session.feather || 0);
     setDetections(session.detections || []);
     setEditDets(session.editDets || []);
@@ -154,6 +171,7 @@ export function PipelineProvider({ children }) {
     fullResCanvasRef,
     faceBlurCanvasRef,
     tattooMaskDirtyRef,
+    tattooCreditClaimedRef,
     editDets, setEditDets,
     editorReturnMode, setEditorReturnMode,
     reset,

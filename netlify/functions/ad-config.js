@@ -10,6 +10,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { authenticateAdmin } from './auth.js';
 import { rateLimit, checkOrigin } from './rateLimit.js';
+import { withCors } from './_cors.js';
 
 const CONFIG_KEY = 'weights';
 
@@ -29,7 +30,7 @@ function getClient() {
   return supabase;
 }
 
-export const handler = async (event) => {
+const adConfigHandler = async (event) => {
   // Rate-limit every request (including OPTIONS) to prevent endpoint enumeration
   // and to cap Supabase-read quota on the public GET path, which has no auth.
   const rl = await rateLimit(event, 10); // 10 req/min per IP
@@ -114,3 +115,5 @@ export const handler = async (event) => {
 
   return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 };
+
+export const handler = withCors(adConfigHandler);

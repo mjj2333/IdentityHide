@@ -1,0 +1,16 @@
+# Redact.ID — search engine crawl rules
+# Spec: https://www.robotstxt.org/robotstxt.html
+
+User-agent: *
+Allow: /
+
+# Staff and user-specific routes — no value indexed, and we don't want
+# crawlers landing on auth-walled pages and reporting them as broken.
+Disallow: /admin
+Disallow: /account
+Disallow: /success
+
+# Backend endpoints — never useful in search results.
+Disallow: /.netlify/
+
+Sitemap: https://redactid.app/sitemap.xml

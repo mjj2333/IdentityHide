@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
-import { fileToCanvas, downscaleToMegapixels, canvasToBlob } from './imageHelpers';
-import { applyMaskedBlur, stackBlur, FACE_BOX_EXPAND } from './blurEngine';
+import { fileToCanvas, downscaleToMegapixels, canvasToBlob, capToMaxDimension } from './imageHelpers';
+import { getMaxWorkingDimension } from './platform';
+import { applyMaskedBlur, stackBlur, FACE_BOX_EXPAND, migrateBlurSettings } from './blurEngine';
 import { extractMetadata } from './metadataExtractor';
 import {
   uploadImage,
@@ -76,10 +77,18 @@ export async function prepareImage(file, tierMP = 1) {
     fileToCanvas(file),
     extractMetadata(file).catch(() => null),
   ]);
-  const { canvas: strippedCanvas } = downscaleToMegapixels(fullCanvas, tierMP);
+  const { canvas: tierCanvas } = downscaleToMegapixels(fullCanvas, tierMP);
   // Free full-res canvas (batch doesn't need it — we re-export at working resolution)
   fullCanvas.width = 0;
   fullCanvas.height = 0;
+  // Cap the editing canvas on memory-constrained devices (same reason as the
+  // single-image path — keeps iOS from running out of canvas memory).
+  const cap = capToMaxDimension(tierCanvas, getMaxWorkingDimension());
+  const strippedCanvas = cap.canvas;
+  if (cap.scaled) {
+    tierCanvas.width = 0;
+    tierCanvas.height = 0;
+  }
   const thumbnailCanvas = createThumbnail(strippedCanvas);
   const thumbnailUrl = await canvasToBlobUrl(thumbnailCanvas);
   // `hadLocation` is only meaningful for JPEGs — extractMetadata returns
@@ -107,23 +116,15 @@ export function buildFaceMask(detections, width, height, mode, feather = 0, face
 
   if (mode !== 'blackbar') {
     for (const det of detections) {
+      if (det.kind === 'sticker') continue; // stickers aren't blur regions
       ctx.fillStyle = 'white';
-      if (det.shape === 'rectangle') {
-        const w = (det.bottomRight[0] - det.topLeft[0]) * FACE_BOX_EXPAND;
-        const h = (det.bottomRight[1] - det.topLeft[1]) * FACE_BOX_EXPAND;
-        const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-        const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-        ctx.fillRect(cx - w/2, cy - h/2, w, h);
-      } else {
-        // Default: ellipse (auto-detected faces)
-        const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
-        const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
-        const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
-        const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
-        ctx.beginPath();
-        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      const cx = (det.topLeft[0] + det.bottomRight[0]) / 2;
+      const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
+      const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * FACE_BOX_EXPAND;
+      const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * FACE_BOX_EXPAND;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -165,7 +166,7 @@ export function buildFaceMask(detections, width, height, mode, feather = 0, face
 export function applyFaceBlurToCanvas(baseCanvas, imageEntry, globalBlurSettings, globalFeather) {
   const { detections, editDetections, blurSettings: perImageSettings, localFeather, faceBlurCanvas } = imageEntry;
   const dets = editDetections || detections || [];
-  const settings = perImageSettings || globalBlurSettings;
+  const settings = migrateBlurSettings(perImageSettings || globalBlurSettings);
   const feather = localFeather != null ? localFeather : globalFeather;
 
   // Short-circuit only when there's truly nothing to blur (no detections AND
@@ -193,9 +194,17 @@ export function applyFaceBlurToCanvas(baseCanvas, imageEntry, globalBlurSettings
     resized.getContext('2d').drawImage(faceBlurCanvas, 0, 0, width, height);
     faceBrushCanvas = resized;
   }
-  const mask = buildFaceMask(dets, width, height, mode, feather, faceBrushCanvas);
-  const barSettings = mode === 'blackbar' ? { width: settings.barWidth ?? 20, length: settings.barLength ?? 110, angle: settings.barAngle ?? 0 } : null;
-  return applyMaskedBlur(baseCanvas, mask, mode, strength, dets, barSettings);
+  const stickerEnabled = !!settings.stickerEnabled; // freehand color-brush flag
+  const wantBlur = mode === 'gaussian' || mode === 'pixelate';
+  const blurDets = dets.filter(d => d.kind !== 'sticker');
+  const stickerObjects = dets.filter(d => d.kind === 'sticker');
+  const blurMask = wantBlur ? buildFaceMask(blurDets, width, height, mode, feather, faceBrushCanvas) : null;
+  // Freehand color strokes only (no detection shapes).
+  const freehandStickerMask = stickerEnabled ? buildFaceMask([], width, height, 'blackbar', 0, faceBrushCanvas) : null;
+  return applyMaskedBlur(
+    baseCanvas, blurMask, wantBlur ? mode : 'none', strength,
+    stickerObjects, freehandStickerMask, settings.barColor || '#000000',
+  );
 }
 
 /**

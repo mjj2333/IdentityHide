@@ -1,10 +1,22 @@
 import { useCallback } from 'react';
 
+// BlazeFace resizes its input to 128×128 internally, so detail above ~2048px
+// is wasted. Feeding a full 12–24MP canvas to TF.js spikes memory and can
+// exceed iOS WebGL's max texture size (~4096px), which fails the call and
+// trips the reload-retry loop. We detect on a downscaled copy and scale the
+// resulting boxes back to source coordinates.
+const MAX_DETECT_DIM = 2048;
+
 const BLAZEFACE_MAX_FACES = 20;
 const BLAZEFACE_SCORE_THRESHOLD = 0.9;
 const NMS_IOU_THRESHOLD = 0.3;
 const TILE_SIZE_RATIO = 0.6;
 const ELLIPSE_CONTOUR_POINTS = 36;
+// If the full-image pass already returns a face at this confidence or higher,
+// we skip the 4 tile passes entirely. Tiles exist to catch small / distant
+// faces that disappear at BlazeFace's 128×128 internal input — but when the
+// user's subject is clearly in frame, tiles are 4× wasted inference.
+const DETECT_FAST_PATH_PROBABILITY = 0.97;
 
 // TF.js and BlazeFace are lazy-loaded on first detect() call to keep the
 // initial bundle small (~1.3 MB of TF.js stays out of the main chunk).
@@ -39,11 +51,21 @@ async function loadModel() {
   if (model) return model;
   if (modelLoading) return modelLoading;
   modelLoading = (async () => {
-    // Dynamic imports — Vite will code-split these into a separate chunk
-    tf = await import('@tensorflow/tfjs-core');
-    await import('@tensorflow/tfjs-backend-webgl');
-    await import('@tensorflow/tfjs-backend-cpu');
-    const blazeface = await import('@tensorflow-models/blazeface');
+    // Dynamic imports — Vite code-splits these into separate chunks. Fetch
+    // all four in PARALLEL via Promise.all instead of sequentially, since
+    // none of them depend on the others at import time. The backends
+    // self-register into the tf namespace once loaded; blazeface is
+    // independent of tf-core at module-load time (only uses it at runtime
+    // inside .load()). Cuts cold-start face-detect time by 1-3s on slow
+    // networks (each chunk used to wait for the previous to finish).
+    const [tfModule, , , blazefaceModule] = await Promise.all([
+      import('@tensorflow/tfjs-core'),
+      import('@tensorflow/tfjs-backend-webgl'),
+      import('@tensorflow/tfjs-backend-cpu'),
+      import('@tensorflow-models/blazeface'),
+    ]);
+    tf = tfModule;
+    const blazeface = blazefaceModule;
 
     try {
       await tf.setBackend('webgl');
@@ -123,6 +145,15 @@ async function detectMultiScale(faceModel, canvas) {
   const fullPreds = await faceModel.estimateFaces(canvas, false);
   addPredictions(fullPreds, 0, 0);
 
+  // Fast path — if the full-image pass found at least one high-confidence face,
+  // skip the tiled passes. Saves 4× inference cost in the common case (subject
+  // is clearly in frame); tiles still run when the full pass came back empty
+  // or only found low-confidence detections (likely a small distant face).
+  if (raw.some(r => r.probability >= DETECT_FAST_PATH_PROBABILITY)) {
+    console.log(`[FaceDetect] Fast path — ${raw.length} detection(s) at ≥${DETECT_FAST_PATH_PROBABILITY} confidence, skipping tiles`);
+    return nms(raw, NMS_IOU_THRESHOLD);
+  }
+
   // Pass 2: overlapping 2x2 tiles (60% of image each, 20% overlap)
   const tileW = Math.round(width * TILE_SIZE_RATIO);
   const tileH = Math.round(height * TILE_SIZE_RATIO);
@@ -169,51 +200,70 @@ export function useFaceDetection() {
   const detect = useCallback(async (sourceCanvas) => {
     let face = await loadModel();
 
-    let predictions;
-    try {
-      predictions = await detectMultiScale(face, sourceCanvas);
-    } catch (err) {
-      // WebGL context loss — dispose stale model, reload, retry once.
-      // Capped at MAX_MODEL_RELOADS across the page lifetime.
-      if (modelReloadCount >= MAX_MODEL_RELOADS) {
-        console.error(`[FaceDetect] Giving up after ${MAX_MODEL_RELOADS} reload attempts:`, err.message);
-        throw err;
-      }
-      modelReloadCount++;
-      console.warn(`[FaceDetect] Detection failed, reloading model (attempt ${modelReloadCount}/${MAX_MODEL_RELOADS}):`, err.message);
-      disposeModel();
-      face = await loadModel();
-      predictions = await detectMultiScale(face, sourceCanvas);
+    // Detect on a downscaled copy (see MAX_DETECT_DIM). `inv` scales the
+    // resulting coordinates back into source space.
+    const { width: sw, height: sh } = sourceCanvas;
+    const longest = Math.max(sw, sh);
+    const ds = longest > MAX_DETECT_DIM ? MAX_DETECT_DIM / longest : 1;
+    let detectCanvas = sourceCanvas;
+    if (ds < 1) {
+      detectCanvas = document.createElement('canvas');
+      detectCanvas.width = Math.max(1, Math.round(sw * ds));
+      detectCanvas.height = Math.max(1, Math.round(sh * ds));
+      detectCanvas.getContext('2d').drawImage(sourceCanvas, 0, 0, detectCanvas.width, detectCanvas.height);
     }
+    const inv = ds < 1 ? 1 / ds : 1;
 
-    return predictions.map((pred) => {
-      const topLeft = pred.topLeft;
-      const bottomRight = pred.bottomRight;
-
-      const cx = (topLeft[0] + bottomRight[0]) / 2;
-      const cy = (topLeft[1] + bottomRight[1]) / 2;
-      const rx = (bottomRight[0] - topLeft[0]) / 2;
-      const ry = (bottomRight[1] - topLeft[1]) / 2;
-
-      const contourPoints = ELLIPSE_CONTOUR_POINTS;
-      const contour = [];
-      for (let i = 0; i < contourPoints; i++) {
-        const angle = (i / contourPoints) * 2 * Math.PI;
-        contour.push([
-          cx + rx * Math.cos(angle),
-          cy + ry * Math.sin(angle),
-        ]);
+    try {
+      let predictions;
+      try {
+        predictions = await detectMultiScale(face, detectCanvas);
+      } catch (err) {
+        // WebGL context loss — dispose stale model, reload, retry once.
+        // Capped at MAX_MODEL_RELOADS across the page lifetime.
+        if (modelReloadCount >= MAX_MODEL_RELOADS) {
+          console.error(`[FaceDetect] Giving up after ${MAX_MODEL_RELOADS} reload attempts:`, err.message);
+          throw err;
+        }
+        modelReloadCount++;
+        console.warn(`[FaceDetect] Detection failed, reloading model (attempt ${modelReloadCount}/${MAX_MODEL_RELOADS}):`, err.message);
+        disposeModel();
+        face = await loadModel();
+        predictions = await detectMultiScale(face, detectCanvas);
       }
 
-      return {
-        topLeft,
-        bottomRight,
-        probability: pred.probability,
-        contour,
-        keypoints: pred.landmarks || null,
-        segData: null,
-      };
-    });
+      return predictions.map((pred) => {
+        // Scale boxes/landmarks from detect-canvas space back to source space.
+        const topLeft = [pred.topLeft[0] * inv, pred.topLeft[1] * inv];
+        const bottomRight = [pred.bottomRight[0] * inv, pred.bottomRight[1] * inv];
+
+        const cx = (topLeft[0] + bottomRight[0]) / 2;
+        const cy = (topLeft[1] + bottomRight[1]) / 2;
+        const rx = (bottomRight[0] - topLeft[0]) / 2;
+        const ry = (bottomRight[1] - topLeft[1]) / 2;
+
+        const contourPoints = ELLIPSE_CONTOUR_POINTS;
+        const contour = [];
+        for (let i = 0; i < contourPoints; i++) {
+          const angle = (i / contourPoints) * 2 * Math.PI;
+          contour.push([
+            cx + rx * Math.cos(angle),
+            cy + ry * Math.sin(angle),
+          ]);
+        }
+
+        return {
+          topLeft,
+          bottomRight,
+          probability: pred.probability,
+          contour,
+          keypoints: pred.landmarks ? pred.landmarks.map((p) => [p[0] * inv, p[1] * inv]) : null,
+          segData: null,
+        };
+      });
+    } finally {
+      if (ds < 1) { detectCanvas.width = 0; detectCanvas.height = 0; }
+    }
   }, []);
 
   return { detect };

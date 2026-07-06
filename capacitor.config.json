@@ -1,0 +1,21 @@
+{
+  "appId": "com.redactid.app",
+  "appName": "Redact.ID",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "always",
+    "scheme": "Redact.ID",
+    "backgroundColor": "#0d0c0a"
+  },
+  "server": {
+    "iosScheme": "capacitor",
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "Keyboard": {
+      "resize": "body",
+      "resizeOnFullScreen": true,
+      "style": "DARK"
+    }
+  }
+}

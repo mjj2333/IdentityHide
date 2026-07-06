@@ -8,6 +8,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { checkOrigin } from './rateLimit.js';
+import { withCors } from './_cors.js';
 
 // Fallback if Supabase is unreachable
 const DEFAULT_SPOTS = [
@@ -81,7 +82,7 @@ function pickWeighted(spots) {
   return VAST_BASE + active[active.length - 1].spot_id;
 }
 
-export const handler = async (event) => {
+const vastProxyHandler = async (event) => {
   // Rate limiting was added here, then removed — the Netlify Blobs CAS
   // cycle inside rateLimit() adds seconds of latency per call, and the
   // ad-preload retry loop in clickadillaAd.js multiplies that into
@@ -167,6 +168,8 @@ export const handler = async (event) => {
     body: JSON.stringify({ videoUrl: null, error: 'No ad fill', impressions: [], depth: 0 }),
   };
 };
+
+export const handler = withCors(vastProxyHandler);
 
 async function resolveVast(url, depth, clientIp, clientUa) {
   if (depth > MAX_DEPTH) throw new Error('Too many VAST wrapper redirects');

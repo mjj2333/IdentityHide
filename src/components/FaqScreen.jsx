@@ -1,6 +1,13 @@
 import { useState, useId } from 'react';
 import ScreenShell from './ScreenShell';
+import { useDocumentMeta } from '../hooks/useDocumentMeta';
 
+// Each entry pairs a renderable answer (`a`, can be string or JSX) with a
+// plain-HTML version (`aHtml`) used by FAQPage structured data. Google
+// requires the schema text to match what the user sees, so any change to
+// `a` should land in `aHtml` too. For string answers we just reuse `a`
+// (no need to duplicate); for JSX answers the HTML string mirrors the
+// rendered markup.
 const FAQ_DATA = [
   {
     category: 'App Info',
@@ -21,6 +28,7 @@ const FAQ_DATA = [
             <p>Everything else — mask editing, metadata stripping, and export — stays on your device.</p>
           </>
         ),
+        aHtml: '<p>AI is used for two key functions:</p><ul><li>Face detection and blurring — runs entirely in your browser using a small on-device model</li><li>Tattoo removal — the masked region of your image is sent to our processing server, where AI inpainting fills the area; the server processes it in memory and discards it immediately</li></ul><p>Everything else — mask editing, metadata stripping, and export — stays on your device.</p>',
       },
       {
         q: 'What do I get with the premium plan? (Coming soon)',
@@ -35,6 +43,11 @@ const FAQ_DATA = [
             </ul>
           </>
         ),
+        aHtml: '<p>The premium plan includes:</p><ul><li>No ads</li><li>Unlimited edits</li><li>Batch processing for multiple images</li><li>Faster processing speeds</li></ul>',
+      },
+      {
+        q: 'Is AI tattoo removal free?',
+        a: 'Face blur, redaction stickers, and metadata stripping are always free and unlimited. AI tattoo removal is a premium feature, but free users get 3 removals per week, plus more by watching a short ad. Premium unlocks unlimited removals with no ads.',
       },
     ],
   },
@@ -71,10 +84,30 @@ const FAQ_DATA = [
             </ul>
           </>
         ),
+        aHtml: '<p>This app is designed for anyone who values privacy, including:</p><ul><li>People sharing content online</li><li>Professionals working under pseudonyms</li><li>Anyone wanting to protect their identity</li><li>Users who want to blur or protect bystanders in their photos</li></ul>',
       },
     ],
   },
 ];
+
+// FAQPage JSON-LD. Computed once at module scope from FAQ_DATA so the schema
+// stays in lockstep with what's rendered. Google requires the answer text
+// in the schema to match what's visible to the user — `aHtml` mirrors the
+// JSX answers, and string `a` values are passed through unchanged.
+const FAQ_SCHEMA = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: FAQ_DATA.flatMap((section) =>
+    section.questions.map((item) => ({
+      '@type': 'Question',
+      name: item.q,
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: item.aHtml || item.a,
+      },
+    }))
+  ),
+};
 
 function FaqItem({ question, answer }) {
   const [open, setOpen] = useState(false);
@@ -113,8 +146,24 @@ function FaqItem({ question, answer }) {
 }
 
 export default function FaqScreen({ onBack }) {
+  useDocumentMeta({
+    title: 'FAQ — Redact.ID',
+    description: 'Common questions about Redact.ID — how face blur, tattoo removal, and metadata stripping work, what stays on your device, and how the privacy model is enforced.',
+    canonical: 'https://redactid.app/faq',
+    // Swap to /og/faq.png once a per-route image is designed.
+    ogImage: 'https://redactid.app/og-image.png',
+  });
   return (
     <ScreenShell backAction={onBack} backLabel="Back">
+      {/* FAQPage structured data — only emitted on this route, where the
+          questions and answers are actually visible. Google uses this to
+          surface FAQ entries directly in search results as expandable
+          "People Also Ask" accordions. The schema lives next to the
+          rendered FAQ so the two stay in sync. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_SCHEMA) }}
+      />
       <div className="faq-container">
         <h1 className="faq-title">FAQ</h1>
 

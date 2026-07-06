@@ -10,7 +10,12 @@
  */
 
 // ── Feature flag ──────────────────────────────────────────────
-export const REWARDED_ADS_ENABLED = false;
+export const REWARDED_ADS_ENABLED = true;
+
+// Terminal SDK statuses that count as "the user actually watched the ad".
+// Used to gate rewarded-credit grants — skipping / closing / consent decline
+// should NOT earn a credit. Keep in sync with AppLixir's status vocabulary.
+const COMPLETED_STATUSES = new Set(['complete', 'allAdsCompleted']);
 
 // ── AppLixir credentials ─────────────────────────────────────
 const CONFIG = {
@@ -22,36 +27,43 @@ const CONFIG = {
 const AD_TIMEOUT = 45_000;
 
 /**
- * Show a rewarded video ad before tattoo removal.
+ * Show a rewarded video ad.
  *
- * Returns a Promise that ALWAYS resolves (never rejects):
- * - Ad completed → resolves
- * - Ad skipped / errored / timed out → resolves (user proceeds)
- * - Ads disabled or SDK not loaded → resolves immediately
+ * Returns a Promise that ALWAYS resolves (never rejects) with
+ *   { completed: boolean, reason: string }
+ *
+ * `completed: true` means the user actually watched the ad to the end —
+ * only those cases should grant a reward. Skips, closes, timeouts, errors,
+ * and consent declines all resolve with `completed: false`.
+ *
+ * When ads are disabled or the SDK isn't loaded, resolves immediately with
+ * `{ completed: false, reason: 'disabled' | 'no-sdk' }`.
  */
 export function showRewardedAd() {
-  if (!REWARDED_ADS_ENABLED) return Promise.resolve();
+  if (!REWARDED_ADS_ENABLED) {
+    return Promise.resolve({ completed: false, reason: 'disabled' });
+  }
 
   if (typeof window.initializeAndOpenPlayer !== 'function') {
     console.warn('[rewardedAd] AppLixir SDK not loaded — skipping');
-    return Promise.resolve();
+    return Promise.resolve({ completed: false, reason: 'no-sdk' });
   }
 
   console.log('[rewardedAd] Showing rewarded ad...');
 
   return new Promise((resolve) => {
     let settled = false;
-    const done = (reason) => {
+    const done = (reason, completed = false) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      console.log('[rewardedAd] Done:', reason);
-      resolve();
+      console.log('[rewardedAd] Done:', reason, { completed });
+      resolve({ completed, reason });
     };
 
     const timer = setTimeout(() => {
       console.warn('[rewardedAd] Timed out after', AD_TIMEOUT, 'ms');
-      done('timeout');
+      done('timeout', false);
     }, AD_TIMEOUT);
 
     try {
@@ -61,28 +73,23 @@ export function showRewardedAd() {
         adStatusCallbackFn: (status) => {
           console.log('[rewardedAd] Status:', status?.type || status);
           const type = status?.type || status;
-          // Terminal statuses — resolve and let user proceed
           const terminal = [
-            'complete',              // ad finished playing
-            'allAdsCompleted',       // all ads done
-            'skipped',               // user skipped
-            'manuallyEnded',         // user closed
-            'thankYouModalClosed',   // thank-you dismissed
-            'consentDeclined',       // GDPR consent declined
+            'complete', 'allAdsCompleted',
+            'skipped', 'manuallyEnded', 'thankYouModalClosed', 'consentDeclined',
           ];
           if (terminal.includes(type)) {
-            done('status:' + type);
+            done('status:' + type, COMPLETED_STATUSES.has(type));
           }
         },
         adErrorCallbackFn: (error) => {
           const msg = error?.getError?.()?.data?.type || 'unknown';
           console.warn('[rewardedAd] Error:', msg);
-          done('error:' + msg);
+          done('error:' + msg, false);
         },
       });
     } catch (err) {
       console.warn('[rewardedAd] SDK error:', err?.message || err);
-      done('error');
+      done('error', false);
     }
   });
 }

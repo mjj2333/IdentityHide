@@ -11,7 +11,7 @@ export function BatchProvider({ children }) {
   // Array of batch image entries
   const [images, setImages] = useState([]);
   // Global blur settings applied to all images (unless per-image override)
-  const [globalBlurSettings, setGlobalBlurSettings] = useState({ mode: 'gaussian', strength: 20, barWidth: 20, barLength: 110, barAngle: 0 });
+  const [globalBlurSettings, setGlobalBlurSettings] = useState({ mode: 'gaussian', stickerEnabled: false, strength: 20, barWidth: 20, barLength: 110, barAngle: 0, barStyle: 'solid', barColor: '#000000' });
   const [globalFeather, setGlobalFeather] = useState(0);
   // Which image is currently open in the editor (null = grid view)
   const [activeImageId, setActiveImageId] = useState(null);
@@ -97,7 +97,7 @@ export function BatchProvider({ children }) {
     setBatchStatus('idle');
     setProcessedCount(0);
     setCurrentImageLabel(null);
-    setGlobalBlurSettings({ mode: 'gaussian', strength: 20, barWidth: 20, barLength: 110, barAngle: 0 });
+    setGlobalBlurSettings({ mode: 'gaussian', stickerEnabled: false, strength: 20, barWidth: 20, barLength: 110, barAngle: 0, barStyle: 'solid', barColor: '#000000' });
     setGlobalFeather(0);
   }, []);
 

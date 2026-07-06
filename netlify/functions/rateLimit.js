@@ -98,8 +98,16 @@ export async function rateLimit(event, limit, windowMs = 60_000) {
 }
 
 const ALLOWED_ORIGINS = [
+  'https://redactid.app',
+  'https://www.redactid.app',
   'https://identityhide.netlify.app',
   'https://identity-hide.com',
+  // Capacitor native shells. Android (per capacitor.config androidScheme:
+  // "https") loads the bundled app from https://localhost; iOS (iosScheme:
+  // "capacitor") loads from capacitor://localhost. Browsers never use these
+  // origins in normal traffic, so allowing them is native-only.
+  'https://localhost',
+  'capacitor://localhost',
 ];
 
 // Netlify draft/preview deploys live at https://<hash>--identityhide.netlify.app
@@ -112,11 +120,18 @@ const PREVIEW_ORIGIN_RE = /^https:\/\/[a-z0-9-]+--identityhide\.netlify\.app$/;
 // hard-coding a single port breaks the moment a dev runs on a new one.
 const LOCALHOST_ORIGIN_RE = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
+// Private LAN ranges (RFC 1918) for Capacitor live-reload — the Android app
+// running on a phone loads from the dev laptop's WiFi IP, e.g. 192.168.1.10.
+// Origin spoofing would require the attacker to control a browser, so opening
+// these ranges doesn't broaden the attack surface beyond local network use.
+const LAN_ORIGIN_RE = /^http:\/\/(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?$/;
+
 function isAllowedOrigin(source) {
   if (!source) return false;
   if (ALLOWED_ORIGINS.includes(source)) return true;
   if (PREVIEW_ORIGIN_RE.test(source)) return true;
   if (LOCALHOST_ORIGIN_RE.test(source)) return true;
+  if (LAN_ORIGIN_RE.test(source)) return true;
   return false;
 }
 

@@ -1,215 +1,206 @@
-/* Resolution Tier Modal — shown after upload, before pipeline runs */
+/* ── Bottom sheet — shared primitive ──
+   Every bottom sheet in the app uses the `.sheet-*` classes. Page-specific
+   sheets add a class of their own (e.g. `.tier-sheet`) for narrow tweaks. */
 
-.tier-backdrop {
+@keyframes redactSheetUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+.sheet-backdrop {
   position: fixed;
   inset: 0;
-  background: var(--overlay-backdrop);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   z-index: var(--z-overlay);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-  padding: 16px;
-  animation: tier-backdrop-in var(--dur-fast) ease-out;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
 }
 
-.tier-modal {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--modal-pad-md);
-  max-width: 720px;
+.sheet-panel {
   width: 100%;
-  max-height: calc(100dvh - 32px);
-  overflow-y: auto;
-  animation: tier-modal-in var(--dur-base) cubic-bezier(0.2, 0.9, 0.3, 1);
+  max-width: 440px;
+  background: var(--surface-elev);
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  padding: 14px 20px calc(26px + var(--safe-area-bottom));
+  animation: redactSheetUp 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 -20px 60px rgba(0, 0, 0, 0.35);
 }
 
-@keyframes tier-backdrop-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  margin: 0 auto 22px;
 }
 
-@keyframes tier-modal-in {
-  from { opacity: 0; transform: translateY(12px) scale(0.98); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+.sheet-title {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.3px;
+  color: var(--fg);
+  margin: 0;
 }
 
-.tier-modal-title {
-  margin: 0 0 4px;
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--text-heading);
+.sheet-subtitle {
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 8px 0 18px;
 }
 
-.tier-modal-subtitle {
-  margin: 0 0 20px;
-  font-size: 0.85rem;
-  color: var(--text-dim);
+.sheet-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
 }
 
-.tier-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+.sheet-actions .sheet-cancel { flex: 1; }
+.sheet-actions .sheet-confirm { flex: 2; }
+
+/* ── Tier-specific additions ── */
+
+.tier-sheet-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 12px;
-  margin-bottom: 20px;
+  padding-right: 4px;
 }
 
-.tier-card {
+.tier-sheet-pill {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.tier-options {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 14px;
-  background: var(--bg-surface);
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  text-align: left;
-  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.tier-option {
+  /* Reset native button styling so the card content renders with the
+     surrounding typography instead of the UA default. */
   font: inherit;
-  transition:
-    border-color var(--dur-fast),
-    background var(--dur-fast),
-    transform var(--dur-fast);
-  min-height: 120px;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 16px;
+  background: transparent;
+  border: none;
+  border-top: 0.5px solid var(--line);
+  transition: background var(--dur-fast);
 }
 
-.tier-card:hover:not(.tier-card-disabled) {
-  background: var(--bg-hover);
-  transform: translateY(-1px);
+.tier-option:first-child { border-top: none; }
+
+.tier-option:hover:not(.is-disabled) {
+  background: var(--surface-elev);
 }
 
-.tier-card:focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
+.tier-option.is-selected {
+  background: var(--accent-tint);
 }
 
-.tier-card-selected {
-  border-color: var(--accent);
-  background: var(--accent-dim);
-}
-
-.tier-card-selected:hover {
-  background: var(--accent-dim);
-}
-
-.tier-card-disabled {
+.tier-option.is-disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.tier-card-header {
+/* Radio indicator (left) */
+.tier-option-radio {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color var(--dur-fast);
+}
+
+.tier-option.is-selected .tier-option-radio {
+  border-color: var(--accent);
+}
+
+.tier-option-radio-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Middle content stack */
+.tier-option-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tier-option-top {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  width: 100%;
   gap: 8px;
 }
 
-.tier-card-label {
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: var(--text-heading);
-}
-
-.tier-card-mp {
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--text-dim);
-  padding: 2px 6px;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-sm);
-  white-space: nowrap;
-}
-
-.tier-card-selected .tier-card-mp {
-  color: var(--accent);
-  background: var(--bg-surface);
-}
-
-.tier-card-dims {
-  font-size: 0.75rem;
-  font-family: var(--mono);
-  color: var(--text-dim);
-}
-
-.tier-card-desc {
-  font-size: 0.8rem;
-  line-height: 1.3;
-  color: var(--text-dim);
-  margin-top: auto;
-}
-
-.tier-card-time {
-  font-size: 0.7rem;
-  color: var(--text-muted);
+.tier-option-label {
+  font-family: var(--sans);
+  font-size: 16px;
   font-weight: 500;
+  letter-spacing: -0.2px;
+  color: var(--fg);
 }
 
-.tier-modal-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
+.tier-option-mp {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
 }
 
-/* Mobile: 2×2 grid with larger tap targets */
-@media (max-width: 640px) {
-  .tier-modal {
-    padding: var(--modal-pad-sm);
-  }
-  .tier-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-  }
-  .tier-card {
-    min-height: 110px;
-    padding: 12px;
-  }
-  .tier-modal-title {
-    font-size: 1rem;
-  }
+.tier-option-sub {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
-/* Small phones (iPhone SE, etc.): tighter spacing */
-@media (max-width: 414px) {
-  .tier-backdrop {
-    padding: 10px;
-  }
-  .tier-grid {
-    gap: 8px;
-  }
-  .tier-card {
-    padding: 10px;
-    min-height: 100px;
-    gap: 4px;
-  }
-  .tier-card-label {
-    font-size: 0.88rem;
-  }
-  .tier-card-desc {
-    font-size: 0.75rem;
-  }
+/* Trailing time estimate */
+.tier-option-time {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.3px;
 }
 
-/* Very small phones: stack single column so everything stays readable */
-@media (max-width: 360px) {
-  .tier-grid {
-    grid-template-columns: 1fr;
-  }
-  .tier-card {
-    min-height: auto;
-  }
-}
-
-/* Respect reduced-motion: no entrance animations, no hover lift */
 @media (prefers-reduced-motion: reduce) {
-  .tier-backdrop,
-  .tier-modal {
-    animation: none;
-  }
-  .tier-card:hover:not(.tier-card-disabled) {
-    transform: none;
-  }
+  .sheet-panel { animation: none; }
 }

@@ -1,7 +1,27 @@
 import { useState, useEffect } from 'react';
 
+// Not renamed when the app rebranded to Redact.ID — changing the key would
+// reset every existing user's saved theme preference back to the system
+// default. The key name is internal, not user-facing.
 const STORAGE_KEY = 'identityhide-theme';
 
+const SunIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
+  </svg>
+);
+
+const MoonIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
+  </svg>
+);
+
+/**
+ * Theme picker rendered as a two-segment pill (sun / moon).
+ * The active segment fills with `--fg` and its glyph flips to `--bg`,
+ * per the Redact.ID wordmark row spec.
+ */
 export default function ThemeToggle() {
   const [theme, setTheme] = useState(() => {
     try {
@@ -20,31 +40,28 @@ export default function ThemeToggle() {
     }
   }, [theme]);
 
-  const toggle = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
+  const set = (next) => () => setTheme(next);
 
   return (
-    <button
-      className="chrome-toggle chrome-toggle--theme"
-      onClick={toggle}
-      aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-    >
-      {theme === 'dark' ? (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="5" />
-          <line x1="12" y1="1" x2="12" y2="3" />
-          <line x1="12" y1="21" x2="12" y2="23" />
-          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-          <line x1="1" y1="12" x2="3" y2="12" />
-          <line x1="21" y1="12" x2="23" y2="12" />
-          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-        </svg>
-      ) : (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-        </svg>
-      )}
-    </button>
+    <div className="theme-pill" role="group" aria-label="Theme">
+      <button
+        type="button"
+        className={`theme-pill__seg${theme === 'light' ? ' is-active' : ''}`}
+        aria-pressed={theme === 'light'}
+        aria-label="Light mode"
+        onClick={set('light')}
+      >
+        <SunIcon />
+      </button>
+      <button
+        type="button"
+        className={`theme-pill__seg${theme === 'dark' ? ' is-active' : ''}`}
+        aria-pressed={theme === 'dark'}
+        aria-label="Dark mode"
+        onClick={set('dark')}
+      >
+        <MoonIcon />
+      </button>
+    </div>
   );
 }

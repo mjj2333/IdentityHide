@@ -1,0 +1,19 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["TEAMID_PLACEHOLDER.com.redactid.app"],
+        "components": [
+          {
+            "/": "/success",
+            "comment": "Stripe Checkout return after subscription"
+          },
+          {
+            "/": "/account",
+            "comment": "Account screen deep link"
+          }
+        ]
+      }
+    ]
+  }
+}

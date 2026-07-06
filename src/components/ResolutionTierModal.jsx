@@ -12,19 +12,17 @@ import { track } from '../utils/analytics';
 import '../styles/ResolutionTierModal.css';
 
 /**
- * Blocking modal shown after a successful upload but before the pipeline
- * starts. Lets the user pick the working megapixel tier, which controls
- * how aggressively the image is downscaled before face detection + Flux
- * inpainting. Tiers larger than the source image are disabled.
+ * Quality picker — shown as a bottom sheet after a successful upload but
+ * before the pipeline starts. Lets the user pick the working megapixel
+ * tier, which controls how aggressively the image is downscaled before
+ * face detection + Flux inpainting. Tiers larger than the source image
+ * are disabled automatically.
  *
  * onSelect contract: called as `onSelect(mp, selectedKey)` on confirm.
  *   - `mp` is the numeric megapixel target (already resolved via getTierMP).
  *   - `selectedKey` is the tier identifier string ('fast' or 'native').
  * Persistence of `selectedKey` to localStorage is handled inside this modal
- * via `saveTierKey(selectedKey)` before onSelect fires — the caller does NOT
- * need to persist it. Callers currently use only `mp` and ignore
- * `selectedKey` (see DropZone.handleTierSelect); the key is emitted anyway
- * so future callers that need it don't have to re-read localStorage.
+ * via `saveTierKey(selectedKey)` before onSelect fires.
  */
 export default function ResolutionTierModal({ srcWidth, srcHeight, onSelect, onCancel }) {
   const modalRef = useRef(null);
@@ -33,14 +31,13 @@ export default function ResolutionTierModal({ srcWidth, srcHeight, onSelect, onC
   useEffect(() => { onCancelRef.current = onCancel; }, [onCancel]);
   useFocusTrap(modalRef);
 
-  // Annotate tiers with availability + effective dimensions for this source.
   const tiers = useMemo(
     () => getAvailableTiers(srcWidth, srcHeight),
     [srcWidth, srcHeight]
   );
 
   // Pre-select saved tier if still available, otherwise fall back to the
-  // largest available tier (which is usually Fast for tiny images).
+  // first available tier.
   const [selectedKey, setSelectedKey] = useState(() => {
     const saved = getSavedTierKey();
     const savedTier = tiers.find((t) => t.key === saved);
@@ -49,8 +46,6 @@ export default function ResolutionTierModal({ srcWidth, srcHeight, onSelect, onC
     return firstAvailable?.key || DEFAULT_TIER_KEY;
   });
 
-  // Fire one "disabled tiers seen" event per modal open so we can learn how
-  // often users upload images too small to benefit from higher tiers.
   const reportedRef = useRef(false);
   useEffect(() => {
     if (reportedRef.current) return;
@@ -61,7 +56,6 @@ export default function ResolutionTierModal({ srcWidth, srcHeight, onSelect, onC
     }
   }, [tiers]);
 
-  // Focus the primary button on mount, handle Escape
   useEffect(() => {
     confirmRef.current?.focus();
     const onKey = (e) => {
@@ -90,23 +84,27 @@ export default function ResolutionTierModal({ srcWidth, srcHeight, onSelect, onC
 
   return (
     <div
-      className="tier-backdrop"
+      className="sheet-backdrop"
       onClick={handleCancel}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="tier-modal-title"
+      aria-labelledby="tier-sheet-title"
     >
       <div
-        className="tier-modal"
+        className="sheet-panel tier-sheet"
         ref={modalRef}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id="tier-modal-title" className="tier-modal-title">Choose output quality</h2>
-        <p className="tier-modal-subtitle">
-          Higher quality gives sharper results but takes longer. Your photo: {srcWidth}×{srcHeight}
+        <div className="sheet-handle" aria-hidden="true" />
+        <div className="tier-sheet-heading">
+          <h2 id="tier-sheet-title" className="sheet-title">Choose quality</h2>
+          <span className="tier-sheet-pill">{srcWidth}×{srcHeight}</span>
+        </div>
+        <p className="sheet-subtitle">
+          Higher quality takes longer. Your photo is processed on-device.
         </p>
 
-        <div className="tier-grid" role="radiogroup" aria-label="Resolution tier">
+        <div className="tier-options" role="radiogroup" aria-label="Resolution tier">
           {tiers.map((tier) => {
             const dims = estimateDimensions(srcWidth, srcHeight, tier.mp);
             const isSelected = selectedKey === tier.key;
@@ -118,34 +116,42 @@ export default function ResolutionTierModal({ srcWidth, srcHeight, onSelect, onC
                 role="radio"
                 aria-checked={isSelected}
                 aria-disabled={disabled}
-                className={`tier-card${isSelected ? ' tier-card-selected' : ''}${disabled ? ' tier-card-disabled' : ''}`}
+                className={`tier-option${isSelected ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
                 onClick={() => !disabled && setSelectedKey(tier.key)}
               >
-                <div className="tier-card-header">
-                  <span className="tier-card-label">{tier.label}</span>
-                  <span className="tier-card-mp">{tier.time}</span>
-                </div>
-                <div className="tier-card-dims">
-                  {disabled
-                    ? 'Photo too small for this option'
-                    : `Output: ${dims.width}×${dims.height}`}
-                </div>
-                <div className="tier-card-desc">{tier.desc}</div>
+                <span className="tier-option-radio" aria-hidden="true">
+                  {isSelected && <span className="tier-option-radio-dot" />}
+                </span>
+                <span className="tier-option-body">
+                  <span className="tier-option-top">
+                    <span className="tier-option-label">{tier.label}</span>
+                    <span className="tier-option-mp">
+                      {tier.mp === Infinity ? 'Original' : `${tier.mp} MP`}
+                    </span>
+                  </span>
+                  <span className="tier-option-sub">
+                    {disabled
+                      ? 'Photo too small for this option'
+                      : <>{tier.desc} · {dims.width}×{dims.height}</>}
+                  </span>
+                </span>
+                <span className="tier-option-time">{tier.time}</span>
               </button>
             );
           })}
         </div>
 
-        <div className="tier-modal-actions">
-          <button className="btn btn-ghost" onClick={handleCancel}>
+        <div className="sheet-actions">
+          <button type="button" className="btn btn-secondary sheet-cancel" onClick={handleCancel}>
             Cancel
           </button>
           <button
             ref={confirmRef}
-            className="btn btn-primary"
+            type="button"
+            className="btn btn-primary sheet-confirm"
             onClick={handleConfirm}
           >
-            Use this resolution
+            Continue →
           </button>
         </div>
       </div>

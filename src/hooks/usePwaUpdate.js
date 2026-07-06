@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { track } from '../utils/analytics';
+import { isNativeApp } from '../utils/platform';
 
 // How often to poll for a new service worker while the tab is open. 60 min is
 // a good balance: cheap (a single HEAD-equivalent on /sw.js) and fast enough
@@ -46,6 +47,10 @@ export function usePwaUpdate() {
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
+    // Native shells (Capacitor iOS/Android) load assets from disk via the
+    // capacitor:// scheme. A SW intercepting fetches against that origin
+    // breaks Capacitor's bridge and serves stale cached HTML on cold launches.
+    if (isNativeApp()) return;
 
     let registration = null;
     let intervalId = null;

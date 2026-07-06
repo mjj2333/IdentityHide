@@ -145,7 +145,8 @@ export async function loadSession() {
     blurSettings: data.blurSettings,
     feather: data.feather,
     detections: data.detections || [],
-    editDets: data.editDets || [],
+    // Migrate pre-"kind" sessions: every region defaults to a blur object.
+    editDets: (data.editDets || []).map(d => ({ ...d, kind: d.kind || 'blur' })),
     tierMP: data.tierMP || 1,
     tattooMaskCanvas,
     strippedCanvas,
