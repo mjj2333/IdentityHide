@@ -29,17 +29,20 @@ export function BatchProvider({ children }) {
   // changes any editing state, and clears it on unmount.
   const batchDirtyRef = useRef(false);
 
-  // Add images to the batch (up to 20 total)
-  const addImages = useCallback((newEntries) => {
+  // Add images to the batch. `cap` is the max total the batch may hold (20
+  // for premium, 3 for the free tier). Enforced HERE so every entry path
+  // (home-screen seed, in-grid "add more") shares one ceiling; callers pass
+  // the tier cap. Defaults to 20 so any un-tiered caller stays bounded.
+  const addImages = useCallback((newEntries, cap = 20) => {
     setImages(prev => {
       const combined = [...prev, ...newEntries];
-      return combined.slice(0, 20); // hard cap at 20
+      return combined.slice(0, cap);
     });
   }, []);
 
   // Seed batch from raw File objects (used by DropZone on multi-file upload).
   // Builds entry objects and adds them — replaces the old window.__batchFiles hack.
-  const seedFiles = useCallback((files) => {
+  const seedFiles = useCallback((files, cap = 20) => {
     const entries = files.map(file => ({
       id: makeId(),
       file,
@@ -53,7 +56,7 @@ export function BatchProvider({ children }) {
       tattooMaskCanvas: null,
       error: null,
     }));
-    addImages(entries);
+    addImages(entries, cap);
   }, [addImages]);
 
   // Remove an image by id

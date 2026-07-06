@@ -2,9 +2,11 @@ import { useState } from 'react';
 import ScreenShell from './ScreenShell';
 import RedeemCodeModal from './RedeemCodeModal';
 import SignInModal from './SignInModal';
+import SubscribeModal from './SubscribeModal';
 import ConfirmModal from './ConfirmModal';
 import { useEntitlement } from '../context/EntitlementContext';
 import { openPortal } from '../utils/stripe';
+import { isNativeApp } from '../utils/platform';
 
 function formatExpiry(ms) {
   if (!ms) return null;
@@ -26,6 +28,10 @@ export default function AccountScreen({ onBack }) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
+  const [showSubscribe, setShowSubscribe] = useState(false);
+  // Purchase UI is web-only; the store builds must not show a non-store
+  // payment path. Promo redemption and sign-in stay available everywhere.
+  const canPurchase = !isNativeApp();
 
   const handlePortal = async () => {
     if (busy || !email) return;
@@ -69,10 +75,23 @@ export default function AccountScreen({ onBack }) {
 
         {!hasCredential && (
           <section className="account-section">
-            <p>Redeem a promo code for free access to unlimited tattoo removal, batch processing, and an ad-free experience.</p>
+            <p>
+              {canPurchase
+                ? 'Go Premium for unlimited tattoo removal, full batch processing, and an ad-free experience.'
+                : 'Redeem a promo code for access to unlimited tattoo removal, batch processing, and an ad-free experience.'}
+            </p>
             <div className="account-actions">
+              {canPurchase && (
+                <button
+                  className="btn btn-primary btn-lg"
+                  onClick={() => setShowSubscribe(true)}
+                  disabled={busy}
+                >
+                  Go Premium
+                </button>
+              )}
               <button
-                className="btn btn-primary btn-lg"
+                className={`btn ${canPurchase ? 'btn-secondary' : 'btn-primary'} btn-lg`}
                 onClick={() => setShowRedeem(true)}
                 disabled={busy}
               >
@@ -125,7 +144,10 @@ export default function AccountScreen({ onBack }) {
 
             <div className="account-actions">
               {premium ? (
-                source === 'stripe' ? (
+                source === 'stripe' && canPurchase ? (
+                  // Billing portal is a Stripe (non-store) payment surface, so
+                  // like the subscribe button it never renders in the native
+                  // shells. Web-subscribed users manage billing on the web.
                   <button
                     className="btn btn-primary btn-lg"
                     onClick={handlePortal}
@@ -142,8 +164,17 @@ export default function AccountScreen({ onBack }) {
                 )
               ) : (
                 <>
+                  {canPurchase && (
+                    <button
+                      className="btn btn-primary btn-lg"
+                      onClick={() => setShowSubscribe(true)}
+                      disabled={busy}
+                    >
+                      Go Premium
+                    </button>
+                  )}
                   <button
-                    className="btn btn-primary btn-lg"
+                    className={`btn ${canPurchase ? 'btn-secondary' : 'btn-primary'} btn-lg`}
                     onClick={() => setShowRedeem(true)}
                     disabled={busy}
                   >
@@ -189,6 +220,13 @@ export default function AccountScreen({ onBack }) {
           <SignInModal
             onClose={() => setShowSignIn(false)}
             onSuccess={() => setShowSignIn(false)}
+          />
+        )}
+
+        {showSubscribe && (
+          <SubscribeModal
+            source="account"
+            onClose={() => setShowSubscribe(false)}
           />
         )}
 

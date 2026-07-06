@@ -2,23 +2,22 @@ import { useEffect, useRef, useState } from 'react';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { showRewardedAd } from '../utils/rewardedAd';
 import { grantRewardedCredit, canEarnMore, MAX_EARNED_PER_WEEK } from '../utils/credits';
+import { isNativeApp } from '../utils/platform';
 import { track } from '../utils/analytics';
 
 /**
  * Paywall shown when a free user runs out of tattoo-removal credits.
- * Two paths:
- *   - Redeem a beta code (delegates to caller via onRedeemClick)
- *   - Watch ad (if credits earnable today) → grants +1 credit on completion
- *
- * Subscribe references are intentionally absent during beta — the only
- * paid path users see is Stripe Checkout from the Account screen, never
- * promoted from gates or paywalls.
+ * Three paths:
+ *   - Subscribe (web only — delegates to caller via onSubscribeClick; the
+ *     native shells must not show a non-store purchase path)
+ *   - Watch ad (if credits earnable this week) → grants +1 credit on completion
+ *   - Redeem a promo code (delegates to caller via onRedeemClick)
  *
  * `onEarnedCredit` fires when the rewarded ad completes and +1 was granted,
  * so the caller (MaskEditorScreen) can re-check canConsumeCredit and
  * proceed with the Apply it had queued.
  */
-export default function PaywallModal({ onClose, onEarnedCredit, onRedeemClick }) {
+export default function PaywallModal({ onClose, onEarnedCredit, onRedeemClick, onSubscribeClick }) {
   const modalRef = useRef(null);
   const primaryRef = useRef(null);
   const [busy, setBusy] = useState(false);
@@ -38,6 +37,9 @@ export default function PaywallModal({ onClose, onEarnedCredit, onRedeemClick })
   }, [busy]);
 
   const canWatchAd = canEarnMore();
+  // Subscribe is web-only: the Play/App Store builds must not surface a
+  // non-store purchase path, so the button simply never renders there.
+  const showSubscribe = !!onSubscribeClick && !isNativeApp();
   const handleWatchAd = async () => {
     if (busy || !canWatchAd) return;
     setBusy(true);
@@ -78,28 +80,40 @@ export default function PaywallModal({ onClose, onEarnedCredit, onRedeemClick })
       >
         <h3 className="confirm-title" id="paywall-title">Out of tattoo credits</h3>
         <p className="confirm-message">
-          You've used all your free tattoo removals for this week. Redeem a promo code to unlock everything, or watch a short ad for one more credit.
+          {showSubscribe
+            ? "You've used all your free tattoo removals for this week. Go Premium for unlimited removals, or watch a short ad for one more credit."
+            : "You've used all your free tattoo removals for this week. Watch a short ad for one more credit, or redeem a promo code to unlock everything."}
         </p>
 
         <div className="paywall-actions">
-          {onRedeemClick && (
+          {showSubscribe && (
             <button
               ref={primaryRef}
               className="btn btn-primary btn-lg"
-              onClick={onRedeemClick}
+              onClick={onSubscribeClick}
               disabled={busy}
             >
-              Redeem a promo code
+              Go Premium for unlimited removals
             </button>
           )}
           <button
-            className="btn btn-secondary btn-lg"
+            ref={showSubscribe ? undefined : primaryRef}
+            className={`btn ${showSubscribe ? 'btn-secondary' : 'btn-primary'} btn-lg`}
             onClick={handleWatchAd}
             disabled={busy || !canWatchAd}
             title={canWatchAd ? 'Watch a short ad for +1 tattoo credit' : `You've reached the weekly cap of ${MAX_EARNED_PER_WEEK} earned credits`}
           >
             {canWatchAd ? 'Watch ad for +1 credit' : `Weekly ad cap reached (${MAX_EARNED_PER_WEEK})`}
           </button>
+          {onRedeemClick && (
+            <button
+              className="btn btn-ghost btn-lg"
+              onClick={onRedeemClick}
+              disabled={busy}
+            >
+              Redeem a promo code
+            </button>
+          )}
         </div>
 
         {error && <p className="paywall-error" role="alert">{error}</p>}

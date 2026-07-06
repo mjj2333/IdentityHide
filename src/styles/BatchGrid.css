@@ -83,6 +83,31 @@
   text-align: right;
 }
 
+/* Free-tier upsell banner — web only (hidden entirely on native).
+   Quiet single row above the grid: fact, then two low-pressure actions. */
+.batch-upsell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 14px;
+  margin: 8px 16px 4px;
+  padding: 10px 14px;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.batch-upsell-text {
+  line-height: 1.4;
+}
+.batch-upsell-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
 /* Metadata summary — parity with ReviewScreen's stripped-metadata
    block, but condensed because per-image tables don't scale to 20 photos. */
 .batch-metadata-summary {

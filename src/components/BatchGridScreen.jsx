@@ -13,7 +13,9 @@ import CoachMark from './CoachMark';
 import ConfirmModal from './ConfirmModal';
 import BatchProcessModal from './BatchProcessModal';
 import RedeemCodeModal from './RedeemCodeModal';
+import SubscribeModal from './SubscribeModal';
 import ScreenShell from './ScreenShell';
+import { isNativeApp } from '../utils/platform';
 import '../styles/BatchGrid.css';
 
 function makeId() {
@@ -38,6 +40,14 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
   const [showConfirmBack, setShowConfirmBack] = useState(false);
   const [showProcessModal, setShowProcessModal] = useState(false);
   const [showRedeem, setShowRedeem] = useState(false);
+  const [showSubscribe, setShowSubscribe] = useState(false);
+  // Free tier: batches are capped at 3 images (Premium: 20). Enforced at
+  // add time; BatchContext's own hard cap of 20 stays as the upper bound.
+  const batchCap = premium ? 20 : 3;
+  // Guards the rewarded-ad await in startProcessing — processAbortRef only
+  // flips once processing actually starts, so a double-tap during the ad
+  // would otherwise start a second ad.
+  const adGateRef = useRef(false);
   const fileInputRef = useRef(null);
   const detectingRef = useRef(false);
   const processAbortRef = useRef(null);
@@ -168,7 +178,7 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
     if (files.length === 0) return;
 
     const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
-    const remaining = 20 - images.length;
+    const remaining = Math.max(0, batchCap - images.length);
     const imageFiles = files.filter(f => f.type.startsWith('image/'));
     const oversized = imageFiles.filter(f => f.size > MAX_FILE_SIZE);
     const validFiles = imageFiles.filter(f => f.size <= MAX_FILE_SIZE);
@@ -179,7 +189,9 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
       warnings.push(`${oversized.length} file${oversized.length > 1 ? 's' : ''} over 50 MB skipped`);
     }
     if (validFiles.length > remaining) {
-      warnings.push(`max 20 images — added ${toAdd.length}, skipped ${validFiles.length - remaining}`);
+      warnings.push(premium
+        ? `max 20 images (added ${toAdd.length}, skipped ${validFiles.length - remaining})`
+        : `free batches are capped at ${batchCap} images (added ${toAdd.length}, skipped ${validFiles.length - remaining})`);
     }
     if (warnings.length > 0) {
       setWarning(warnings.join('. ') + '.');
@@ -199,9 +211,9 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
       error: null,
     }));
 
-    addImages(entries);
+    addImages(entries, batchCap);
     track('batch_images_added', { count: entries.length, total: images.length + entries.length });
-  }, [images.length, addImages, setWarning]);
+  }, [images.length, addImages, setWarning, batchCap, premium]);
 
   const handleRemove = useCallback((e, id) => {
     e.stopPropagation();
@@ -276,7 +288,21 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
     // before React commits the `batchStatus='processing'` render that swaps
     // this button for the Cancel button. Without this check, the second
     // call would spawn a second AbortController and leak the first one.
-    if (processAbortRef.current) return;
+    if (processAbortRef.current || adGateRef.current) return;
+
+    // Free tier: a rewarded ad runs before every batch — the ad IS the
+    // payment for the run. An unfilled, failed, or skipped ad NEVER blocks
+    // the batch; worst case the user just proceeds. Premium skips entirely.
+    if (!premium) {
+      adGateRef.current = true;
+      track('batch_rewarded_ad', { count: images.length });
+      try {
+        const { showRewardedAd } = await import('../utils/rewardedAd');
+        await showRewardedAd();
+      } catch { /* no ad available — proceed anyway */ }
+      finally { adGateRef.current = false; }
+      if (processAbortRef.current) return;
+    }
 
     setBatchStatus('processing');
     setProcessedCount(0);
@@ -357,7 +383,7 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
     } finally {
       processAbortRef.current = null;
     }
-  }, [images, globalBlurSettings, globalFeather, setBatchStatus, setProcessedCount, setCurrentImageLabel, updateImage, setImages, onExport, setWarning]);
+  }, [images, globalBlurSettings, globalFeather, setBatchStatus, setProcessedCount, setCurrentImageLabel, updateImage, setImages, onExport, setWarning, premium]);
 
   const handleProcessAll = useCallback(() => {
     if (processAbortRef.current) return;
@@ -404,39 +430,9 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
     }
   };
 
-  // Batch processing is a paid feature. Free users hit an upgrade CTA
-  // instead of the grid. We still render the standard header so the back
-  // button works. `entitlementLoading` gates the gate itself — we wait for
-  // the first entitlement check to resolve before deciding which view to
-  // show, so a subscribed user reloading the page doesn't flash the CTA.
-  if (!premium && !entitlementLoading) {
-    return (
-      <>
-        <ScreenShell
-          backAction={onBack}
-          backLabel="Back"
-          stepLabel="Batch Protect"
-          topRight={images.length > 0 ? <span className="top-bar-count">{images.length}/20</span> : null}
-        >
-          <div className="batch-upgrade-gate">
-            <h3>Batch processing is a Protect+ feature</h3>
-            <p>Redeem a promo code for free access to batch processing, unlimited tattoo removal, and an ad-free experience.</p>
-            <div className="batch-upgrade-actions">
-              <button className="btn btn-primary btn-lg" onClick={() => setShowRedeem(true)}>
-                Redeem a promo code
-              </button>
-            </div>
-          </div>
-        </ScreenShell>
-        {showRedeem && (
-          <RedeemCodeModal
-            onClose={() => setShowRedeem(false)}
-            onSuccess={() => setShowRedeem(false)}
-          />
-        )}
-      </>
-    );
-  }
+  // Batch is open to free users as a capped preview (3 images per run,
+  // rewarded ad before each run). Premium lifts the cap to 20 and removes
+  // the ad. The old hard gate is gone — encouragement over enforcement.
 
   const gStickerOn = !!globalBlurSettings.stickerEnabled;
   const gWantBlur = globalBlurSettings.mode === 'gaussian' || globalBlurSettings.mode === 'pixelate';
@@ -643,9 +639,26 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
         backAction={handleBack}
         backLabel="Back"
         stepLabel="Batch Protect"
-        topRight={<span className="top-bar-count">{images.length}/20</span>}
+        topRight={<span className="top-bar-count">{images.length}/{batchCap}</span>}
         toolbar={toolbarContent}
       >
+      {/* Free-tier upsell — web only. Fully hidden in the native shells:
+          no price, no purchase mention (store anti-steering policies). */}
+      {!premium && !entitlementLoading && !isNativeApp() && (
+        <div className="batch-upsell" role="note">
+          <span className="batch-upsell-text">
+            Free batches: 3 images per run, with an ad. Premium unlocks 20 images and no ads.
+          </span>
+          <span className="batch-upsell-actions">
+            <button className="btn btn-primary btn-sm" onClick={() => setShowSubscribe(true)}>
+              Go Premium
+            </button>
+            <button className="paywall-link" onClick={() => setShowRedeem(true)}>
+              Redeem code
+            </button>
+          </span>
+        </div>
+      )}
       {metadataSummary && (
         <p className="batch-metadata-summary" role="status">{metadataSummary}</p>
       )}
@@ -734,6 +747,20 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
       />
 
       </ScreenShell>
+
+      {showRedeem && (
+        <RedeemCodeModal
+          onClose={() => setShowRedeem(false)}
+          onSuccess={() => setShowRedeem(false)}
+        />
+      )}
+
+      {showSubscribe && (
+        <SubscribeModal
+          source="batch"
+          onClose={() => setShowSubscribe(false)}
+        />
+      )}
 
       {showConfirmBack && (
         <ConfirmModal

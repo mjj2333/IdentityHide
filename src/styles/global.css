@@ -723,6 +723,111 @@ textarea:focus-visible,
   cursor: default;
 }
 
+/* ── Subscribe modal ──
+   Monthly/annual plan picker feeding Stripe hosted Checkout. Web only —
+   never rendered inside the native shells (store billing policies). */
+.subscribe-modal {
+  max-width: 420px;
+}
+
+.subscribe-sub {
+  margin-bottom: 14px;
+}
+
+.subscribe-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.subscribe-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 14px 16px;
+  text-align: left;
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.subscribe-plan:hover {
+  border-color: var(--accent);
+}
+
+.subscribe-plan.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.subscribe-plan:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.subscribe-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.subscribe-plan-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.subscribe-plan-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-fg);
+  background: var(--accent);
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.subscribe-plan-price {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.subscribe-plan-per {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-left: 2px;
+}
+
+.subscribe-plan-note {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.subscribe-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.subscribe-actions .btn {
+  width: 100%;
+}
+
+.subscribe-fineprint {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
 .signin-modal {
   max-width: 400px;
 }

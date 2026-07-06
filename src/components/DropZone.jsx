@@ -6,8 +6,6 @@ import { useImagePipeline } from '../hooks/useImagePipeline';
 import { useCoachMarks, suppressAllWalkthroughs, resetWalkthrough } from '../hooks/useCoachMarks';
 import CoachMark from './CoachMark';
 import ResolutionTierModal from './ResolutionTierModal';
-import RedeemCodeModal from './RedeemCodeModal';
-import BetaWelcomeModal from './BetaWelcomeModal';
 import Wordmark from './Wordmark';
 import { track } from '../utils/analytics';
 import { isNativeApp } from '../utils/platform';
@@ -86,45 +84,8 @@ export default function DropZone() {
   const [dragActive, setDragActive] = useState(false);
   const [savedSession, setSavedSession] = useState(null);
   const [restoring, setRestoring] = useState(false);
-  const [showRedeem, setShowRedeem] = useState(false);
   const { premium } = useEntitlement();
 
-  // Beta welcome popup — shown once per session until the user either
-  // redeems, permanently dismisses, or is already premium. The initial-
-  // state check has to be synchronous, but `premium` from useEntitlement
-  // starts at `false` and only flips true after an async fetch — so we
-  // also peek at localStorage for a stored credential. If the user has
-  // ANY credential cached, the entitlement check that's about to fire
-  // will (almost certainly) confirm premium, and we don't want to flash
-  // the welcome popup during that ~300-800ms verification window.
-  const [showBetaWelcome, setShowBetaWelcome] = useState(() => {
-    if (premium) return false;
-    try {
-      if (localStorage.getItem('ih_beta_welcome_dismissed') === '1') return false;
-      if (localStorage.getItem('ih_user_email')) return false;
-      if (localStorage.getItem('ih_beta_code')) return false;
-    } catch {}
-    return true;
-  });
-  // If premium state flips true after mount (late entitlement fetch),
-  // close the welcome popup — no point advertising the beta to an
-  // already-subscribed user.
-  useEffect(() => {
-    if (premium) setShowBetaWelcome(false);
-  }, [premium]);
-
-  const handleBetaWelcomeSuccess = useCallback(() => {
-    // Redemption succeeded inside the welcome modal. Persist the dismissal
-    // so the user isn't re-prompted on future visits, and close the popup.
-    try { localStorage.setItem('ih_beta_welcome_dismissed', '1'); } catch {}
-    setShowBetaWelcome(false);
-  }, []);
-  const handleBetaWelcomeDismiss = useCallback((dontShowAgain) => {
-    if (dontShowAgain) {
-      try { localStorage.setItem('ih_beta_welcome_dismissed', '1'); } catch {}
-    }
-    setShowBetaWelcome(false);
-  }, []);
   // Pending upload — set when the user picks a file but hasn't yet chosen
   // a resolution tier. Holds { file, width, height } while the modal is open.
   const [pendingUpload, setPendingUpload] = useState(null);
@@ -181,14 +142,18 @@ export default function DropZone() {
   const handleMultipleFiles = useCallback((files) => {
     const imageFiles = files.filter(f => f.type.startsWith('image/') && f.size <= MAX_FILE_SIZE);
     if (imageFiles.length === 0) return;
-    const capped = imageFiles.slice(0, 20);
-    if (imageFiles.length > 20) {
-      setWarning('Maximum 20 images per batch. First 20 selected.');
+    // Free tier caps a batch at 3 images; premium at 20.
+    const cap = premium ? 20 : 3;
+    const capped = imageFiles.slice(0, cap);
+    if (imageFiles.length > cap) {
+      setWarning(premium
+        ? 'Maximum 20 images per batch. First 20 selected.'
+        : `Free batches are capped at ${cap} images. First ${cap} selected. Go Premium for up to 20.`);
     }
     track('batch_upload', { count: capped.length });
-    seedFiles(capped);
+    seedFiles(capped, cap);
     setScreen('batch-grid');
-  }, [seedFiles, setScreen, setWarning, MAX_FILE_SIZE]);
+  }, [seedFiles, setScreen, setWarning, MAX_FILE_SIZE, premium]);
 
   const handleFile = useCallback(async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
@@ -338,16 +303,6 @@ export default function DropZone() {
       <div className="home-header">
         <div className="home-wordmark" onClick={handleLogoTap}>
           <Wordmark size="hero" />
-          {!premium && (
-            <button
-              type="button"
-              className="home-beta-badge home-beta-badge--interactive"
-              aria-label="Redeem a promo code"
-              onClick={(e) => { e.stopPropagation(); setShowRedeem(true); }}
-            >
-              Redeem
-            </button>
-          )}
         </div>
         <p className="home-copy home-copy--primary">Share photos without revealing who you are.</p>
         <p className="home-copy home-copy--secondary">Faces blurred, tattoos removed, location data wiped.</p>
@@ -486,19 +441,6 @@ export default function DropZone() {
         />
       )}
 
-      {showRedeem && (
-        <RedeemCodeModal
-          onClose={() => setShowRedeem(false)}
-          onSuccess={() => setShowRedeem(false)}
-        />
-      )}
-
-      {showBetaWelcome && !showRedeem && (
-        <BetaWelcomeModal
-          onSuccess={handleBetaWelcomeSuccess}
-          onDismiss={handleBetaWelcomeDismiss}
-        />
-      )}
     </main>
   );
 }

@@ -21,9 +21,9 @@ const VALID_EVENTS = [
   'tier_selected', 'tier_modal_cancelled', 'tier_disabled_shown',
   'batch_upload', 'batch_images_added', 'batch_process_start',
   'batch_process_complete', 'batch_export_share', 'batch_export_individual',
-  'batch_export_zip',
+  'batch_export_zip', 'batch_rewarded_ad',
   // Subscription + paywall events (Stripe)
-  'stripe_checkout_opened', 'stripe_checkout_completed',
+  'stripe_checkout_opened', 'stripe_checkout_completed', 'subscribe_modal_shown',
   'paywall_shown', 'paywall_subscribed', 'paywall_watched_ad', 'paywall_dismissed',
   'credit_consumed', 'credit_earned',
   'subscription_gated',

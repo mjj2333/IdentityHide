@@ -23,6 +23,7 @@ import { useEntitlement } from '../context/EntitlementContext';
 import { canConsumeCredit, consumeCredit } from '../utils/credits';
 import PaywallModal from './PaywallModal';
 import RedeemCodeModal from './RedeemCodeModal';
+import SubscribeModal from './SubscribeModal';
 
 
 export default function MaskEditorScreen() {
@@ -55,7 +56,8 @@ export default function MaskEditorScreen() {
   const [applyError, setApplyError] = useState(null);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showRedeem, setShowRedeem] = useState(false);
-  const { premium, syncCreditState } = useEntitlement();
+  const [showSubscribe, setShowSubscribe] = useState(false);
+  const { premium, loading: entitlementLoading, syncCreditState } = useEntitlement();
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef(null);
   const abortRef = useRef(null);
@@ -65,12 +67,18 @@ export default function MaskEditorScreen() {
   // the normal path; this is defense-in-depth matching the ExportScreen
   // pattern.
   const mountedRef = useRef(true);
+  // Ad network warm-up — free users only. Waits for the entitlement check
+  // to resolve so premium users never load ad scripts at all (the Adsterra
+  // "load" actually injects the popunder script, so it IS an ad surface,
+  // not a passive preload). Both modules also guard themselves with
+  // _ENABLED feature flags, so a module load failure is harmless.
   useEffect(() => {
-    // Fire-and-forget lazy imports. Both modules guard themselves with
-    // _ENABLED feature flags, so an undefined export or a module load
-    // failure during transition is harmless.
+    if (entitlementLoading || premium) return;
     import('../utils/clickadillaAd').then((m) => { try { m.preloadAd?.(); } catch {} });
     import('../utils/adsterraAd').then((m) => { try { m.loadAdsterraPopunder?.(); } catch {} });
+  }, [entitlementLoading, premium]);
+
+  useEffect(() => {
     return () => {
       clearInterval(timerRef.current);
       abortRef.current?.abort();
@@ -909,7 +917,7 @@ export default function MaskEditorScreen() {
   }, []);
 
   const progressOverlay = applying ? (
-    <ProgressOverlay progress={applyProgress} elapsed={elapsed} onCancel={handleCancelApply} showTips={premium} />
+    <ProgressOverlay progress={applyProgress} elapsed={elapsed} onCancel={handleCancelApply} showTips />
   ) : null;
 
   const errorOverlay = applyError ? (
@@ -940,16 +948,19 @@ export default function MaskEditorScreen() {
         return false;
       })();
       if (!hasTattoo) { handleSkip(); return; }
-      // Fire ad even when ComfyUI is down — the user intended to process
-      import('../utils/clickadillaAd').then((m) => {
-        try { m.showClickadillaInterstitial?.(); } catch { /* non-blocking */ }
-      });
+      // Fire ad even when ComfyUI is down — the user intended to process.
+      // Free users only: premium is ad-free on every path, including this one.
+      if (!premium) {
+        import('../utils/clickadillaAd').then((m) => {
+          try { m.showClickadillaInterstitial?.(); } catch { /* non-blocking */ }
+        });
+      }
       // Server down but user has a tattoo mask — confirm before discarding it
       setShowOfflineConfirm(true);
       return;
     }
     handleApply();
-  }, [comfyConnected, handleApply, handleSkip, tattooMaskCanvasRef, tattooMaskDirtyRef, inpaintedCanvasRef]);
+  }, [comfyConnected, handleApply, handleSkip, tattooMaskCanvasRef, tattooMaskDirtyRef, inpaintedCanvasRef, premium]);
 
   // Blur-style selector — 3 segmented buttons (Gaussian / Pixelate / Bar).
   // The "Bar" segment is itself a dropdown showing the active bar style
@@ -1643,6 +1654,10 @@ export default function MaskEditorScreen() {
             setShowPaywall(false);
             setShowRedeem(true);
           }}
+          onSubscribeClick={() => {
+            setShowPaywall(false);
+            setShowSubscribe(true);
+          }}
         />
       )}
 
@@ -1650,6 +1665,13 @@ export default function MaskEditorScreen() {
         <RedeemCodeModal
           onClose={() => setShowRedeem(false)}
           onSuccess={() => setShowRedeem(false)}
+        />
+      )}
+
+      {showSubscribe && (
+        <SubscribeModal
+          source="paywall"
+          onClose={() => setShowSubscribe(false)}
         />
       )}
 

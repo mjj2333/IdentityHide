@@ -37,13 +37,12 @@ const FAQ_DATA = [
             <p>The premium plan includes:</p>
             <ul>
               <li>No ads</li>
-              <li>Unlimited edits</li>
+              <li>Unlimited AI tattoo removal</li>
               <li>Batch processing for multiple images</li>
-              <li>Faster processing speeds</li>
             </ul>
           </>
         ),
-        aHtml: '<p>The premium plan includes:</p><ul><li>No ads</li><li>Unlimited edits</li><li>Batch processing for multiple images</li><li>Faster processing speeds</li></ul>',
+        aHtml: '<p>The premium plan includes:</p><ul><li>No ads</li><li>Unlimited AI tattoo removal</li><li>Batch processing for multiple images</li></ul>',
       },
       {
         q: 'Is AI tattoo removal free?',
