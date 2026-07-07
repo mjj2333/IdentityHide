@@ -115,7 +115,7 @@ export default function ExportScreen({ onFeedback }) {
     handleTouchEnd: zoomTouchEnd,
   } = useZoomPan(imgW, imgH, canvasWrapRef, { oneFingerPan: true });
   const [format, setFormat] = useState('jpeg');
-  const [quality, setQuality] = useState(75);
+  const [quality, setQuality] = useState(95);
   const [showOriginal, setShowOriginal] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [fileSize, setFileSize] = useState(null);

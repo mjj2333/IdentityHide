@@ -224,7 +224,10 @@ export function useImagePipeline() {
           const resized = document.createElement('canvas');
           resized.width = src.width;
           resized.height = src.height;
-          resized.getContext('2d').drawImage(resultCanvas, 0, 0, src.width, src.height);
+          const rctx = resized.getContext('2d');
+          rctx.imageSmoothingEnabled = true;
+          rctx.imageSmoothingQuality = 'high';
+          rctx.drawImage(resultCanvas, 0, 0, src.width, src.height);
           resultCanvas = resized;
         }
       } else {

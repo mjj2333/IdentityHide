@@ -308,7 +308,10 @@ async function runComfyUIInpaint(imageEntry, tierMP, signal, onStepProgress) {
     const resized = document.createElement('canvas');
     resized.width = src.width;
     resized.height = src.height;
-    resized.getContext('2d').drawImage(result, 0, 0, src.width, src.height);
+    const rctx = resized.getContext('2d');
+    rctx.imageSmoothingEnabled = true;
+    rctx.imageSmoothingQuality = 'high';
+    rctx.drawImage(result, 0, 0, src.width, src.height);
     result.width = 0; result.height = 0;
     result = resized;
   }

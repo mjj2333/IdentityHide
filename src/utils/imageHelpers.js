@@ -79,7 +79,10 @@ export function downscaleToMegapixels(sourceCanvas, targetMP = 1) {
     const c = document.createElement('canvas');
     c.width = newW;
     c.height = newH;
-    c.getContext('2d').drawImage(sourceCanvas, 0, 0, newW, newH);
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(sourceCanvas, 0, 0, newW, newH);
     console.log(`[downscale] ${width}x${height} → ${newW}x${newH} (rounded to ${ALIGN}x)`);
     return { canvas: c };
   }
@@ -89,7 +92,10 @@ export function downscaleToMegapixels(sourceCanvas, targetMP = 1) {
   const c = document.createElement('canvas');
   c.width = newW;
   c.height = newH;
-  c.getContext('2d').drawImage(sourceCanvas, 0, 0, newW, newH);
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceCanvas, 0, 0, newW, newH);
   const actualMP = (newW * newH) / 1_000_000;
   console.log(`[downscale] ${width}x${height} (${currentMP.toFixed(1)}MP) → ${newW}x${newH} (${actualMP.toFixed(2)}MP)`);
   return { canvas: c };
@@ -118,7 +124,10 @@ export function capToMaxDimension(sourceCanvas, maxDim) {
   const c = document.createElement('canvas');
   c.width = newW;
   c.height = newH;
-  c.getContext('2d').drawImage(sourceCanvas, 0, 0, newW, newH);
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceCanvas, 0, 0, newW, newH);
   console.log(`[cap] ${width}x${height} → ${newW}x${newH} (max ${maxDim}px)`);
   return { canvas: c, scaled: true };
 }
@@ -130,7 +139,10 @@ export function upscaleCanvas(sourceCanvas, targetW, targetH) {
   const c = document.createElement('canvas');
   c.width = targetW;
   c.height = targetH;
-  c.getContext('2d').drawImage(sourceCanvas, 0, 0, targetW, targetH);
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceCanvas, 0, 0, targetW, targetH);
   return c;
 }
 
