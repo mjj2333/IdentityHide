@@ -884,10 +884,24 @@ export default function BatchEditorScreen({ onBack }) {
           </>
         )}
       </div>
-      {/* Size is set by dragging the on-canvas corner handles; only rotation
-          (which handles can't express) keeps a slider. */}
+      {/* Corner handles set the box; Width/Length fine-tune the sticker
+          within it, and Angle rotates it (which handles can't express). */}
       {selectedSticker && (
         <div className="toolbar-row">
+          <div className="toolbar-group toolbar-group-slider">
+            <label className="toolbar-slider">
+              <span>Width</span>
+              <input type="range" min="10" max="100" value={selectedSticker.barWidth ?? 100}
+                onChange={(e) => updateSelectedSticker({ barWidth: parseInt(e.target.value, 10) })} />
+            </label>
+          </div>
+          <div className="toolbar-group toolbar-group-slider">
+            <label className="toolbar-slider">
+              <span>Length</span>
+              <input type="range" min="10" max="100" value={selectedSticker.barLength ?? 100}
+                onChange={(e) => updateSelectedSticker({ barLength: parseInt(e.target.value, 10) })} />
+            </label>
+          </div>
           <div className="toolbar-group toolbar-group-slider">
             <label className="toolbar-slider">
               <span>Angle</span>
