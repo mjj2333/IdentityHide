@@ -428,32 +428,44 @@ export default function BatchEditorScreen({ onBack }) {
   // --- Corner-handle resize (free 2-D) ---
   // Each corner moves independently, opposite corner pinned, min-size clamp.
   // origHw/origHh re-synced so nothing downstream relies on a stale base.
+  // Rotation-aware corner resize (see MaskEditorScreen for the full rationale):
+  // opposite corner pinned in world space, sizing along the box's rotated
+  // axes; reduces to axis-aligned resize when angle is 0.
   const handleResizeDown = useCallback((e, index, corner) => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedIdx(index);
-    const dets = editDetsRef.current;
-    const origTL = [...dets[index].topLeft];
-    const origBR = [...dets[index].bottomRight];
+    const d0 = editDetsRef.current[index];
+    const tl0 = d0.topLeft, br0 = d0.bottomRight;
     const MIN = Math.max(8, imgW * 0.02);
+    const rad = ((d0.angle || 0) * Math.PI) / 180;
+    const ux = Math.cos(rad), uy = Math.sin(rad);
+    const vx = -Math.sin(rad), vy = Math.cos(rad);
+    const sx = corner.includes('e') ? 1 : -1;
+    const sy = corner.includes('s') ? 1 : -1;
+    const cx0 = (tl0[0] + br0[0]) / 2, cy0 = (tl0[1] + br0[1]) / 2;
+    const hw0 = (br0[0] - tl0[0]) / 2, hh0 = (br0[1] - tl0[1]) / 2;
+    const fLocalX = -sx * hw0, fLocalY = -sy * hh0;
+    const fx = cx0 + fLocalX * ux + fLocalY * vx;
+    const fy = cy0 + fLocalX * uy + fLocalY * vy;
 
     const onMove = (ev) => {
       ev.preventDefault();
       const p = screenToImage(ev.clientX, ev.clientY, canvasRef.current);
-      let [l, t] = origTL;
-      let [r, b] = origBR;
-      if (corner.includes('w')) l = Math.min(p.x, r - MIN);
-      if (corner.includes('e')) r = Math.max(p.x, l + MIN);
-      if (corner.includes('n')) t = Math.min(p.y, b - MIN);
-      if (corner.includes('s')) b = Math.max(p.y, t + MIN);
+      const vecX = p.x - fx, vecY = p.y - fy;
+      const W = Math.max(MIN, sx * (vecX * ux + vecY * uy));
+      const H = Math.max(MIN, sy * (vecX * vx + vecY * vy));
+      const ncx = fx + (sx * W / 2) * ux + (sy * H / 2) * vx;
+      const ncy = fy + (sx * W / 2) * uy + (sy * H / 2) * vy;
+      const nhw = W / 2, nhh = H / 2;
       setEditDets(prev => {
         const next = [...prev];
         next[index] = {
           ...next[index],
-          topLeft: [l, t],
-          bottomRight: [r, b],
-          origHw: (r - l) / 2,
-          origHh: (b - t) / 2,
+          topLeft: [ncx - nhw, ncy - nhh],
+          bottomRight: [ncx + nhw, ncy + nhh],
+          origHw: nhw,
+          origHh: nhh,
         };
         return next;
       });
@@ -724,6 +736,10 @@ export default function BatchEditorScreen({ onBack }) {
   const isFreehand = blurSubMode === 'freehand';
   const selectedDet = selectedIdx !== null ? editDets[selectedIdx] : null;
   const selectedSticker = selectedDet && selectedDet.kind === 'sticker' ? selectedDet : null;
+  const selectedBlurRegion = selectedDet && selectedDet.kind !== 'sticker' ? selectedDet : null;
+  const setRegionAngle = (angle) => {
+    setEditDets((prev) => prev.map((d, i) => (i === selectedIdx ? { ...d, angle } : d)));
+  };
   const stickerOn = !!localStickerEnabled; // freehand color-brush flag
   const curStickerStyle = selectedSticker ? (selectedSticker.barStyle || 'solid') : (localBarStyle || 'solid');
   const curStickerColor = selectedSticker ? (selectedSticker.barColor || '#000000') : (localBarColor || '#000000');
@@ -907,6 +923,18 @@ export default function BatchEditorScreen({ onBack }) {
               <span>Angle</span>
               <input type="range" min="-45" max="45" value={selectedSticker.barAngle ?? 0}
                 onChange={(e) => updateSelectedSticker({ barAngle: parseInt(e.target.value, 10) })} />
+            </label>
+          </div>
+        </div>
+      )}
+      {/* Rotate a selected blur region (oval/rectangle) about its centre. */}
+      {selectedBlurRegion && (
+        <div className="toolbar-row">
+          <div className="toolbar-group toolbar-group-slider">
+            <label className="toolbar-slider">
+              <span>Angle</span>
+              <input type="range" min="-90" max="90" value={selectedBlurRegion.angle ?? 0}
+                onChange={(e) => setRegionAngle(parseInt(e.target.value, 10))} />
             </label>
           </div>
         </div>
@@ -1183,6 +1211,7 @@ export default function BatchEditorScreen({ onBack }) {
                   top: `${(det.topLeft[1] / imgH) * 100}%`,
                   width: `${((det.bottomRight[0] - det.topLeft[0]) / imgW) * 100}%`,
                   height: `${((det.bottomRight[1] - det.topLeft[1]) / imgH) * 100}%`,
+                  transform: (det.kind !== 'sticker' && det.angle) ? `rotate(${det.angle}deg)` : undefined,
                   pointerEvents: blurSubMode !== 'freehand' ? 'auto' : 'none',
                 }}
                 onPointerDown={blurSubMode !== 'freehand' ? (e) => handleFaceDragDown(e, i) : undefined}

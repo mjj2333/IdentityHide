@@ -27,12 +27,22 @@ export function drawRegionMask(ctx, det, expand = FACE_BOX_EXPAND) {
   const cy = (det.topLeft[1] + det.bottomRight[1]) / 2;
   const rx = (det.bottomRight[0] - det.topLeft[0]) / 2 * expand;
   const ry = (det.bottomRight[1] - det.topLeft[1]) / 2 * expand;
+  // Rotation (degrees → radians) around the region's own centre. `angle` is
+  // set by the manual-blur Angle slider; auto-detected faces and legacy
+  // regions have none, so this is a no-op for them.
+  const angle = ((det.angle || 0) * Math.PI) / 180;
   ctx.fillStyle = 'white';
   ctx.beginPath();
   if (det.shape === 'rect') {
-    ctx.rect(cx - rx, cy - ry, rx * 2, ry * 2);
+    // ctx.rect has no rotation arg, so build the rotated rect via a transform;
+    // path points bake in the rotation and survive the restore before fill.
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.rect(-rx, -ry, rx * 2, ry * 2);
+    ctx.restore();
   } else {
-    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, cy, rx, ry, angle, 0, Math.PI * 2);
   }
   ctx.fill();
 }

@@ -664,36 +664,48 @@ export default function MaskEditorScreen() {
   }, [faceBlurCanvasRef, forceRender, scheduleBlurPreview]);
 
 
-  // Corner-handle resize: free 2-D resize of the selected object's box.
-  // Each corner moves independently, opposite corner pinned, with a min size.
-  // origHw/origHh are re-synced to the new half-dimensions so the uniform
-  // "Resize" slider scales from the current (possibly stretched) shape.
+  // Corner-handle resize: free 2-D resize of the selected object's box,
+  // rotation-aware. The dragged corner follows the pointer while the opposite
+  // corner stays pinned in world space; sizing happens along the box's own
+  // (rotated) axes. topLeft/bottomRight stay the UNROTATED bounds and `angle`
+  // stays separate, so at angle 0 this reduces to a plain axis-aligned resize.
   const handleResizeDown = useCallback((e, index, corner) => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedOvalIdx(index);
-    const dets = editDetsRef.current;
-    const origTL = [...dets[index].topLeft];
-    const origBR = [...dets[index].bottomRight];
+    const d0 = editDetsRef.current[index];
+    const tl0 = d0.topLeft, br0 = d0.bottomRight;
     const MIN = Math.max(8, imgW * 0.02); // min box side in image px
+    const rad = ((d0.angle || 0) * Math.PI) / 180;
+    const ux = Math.cos(rad), uy = Math.sin(rad);   // +x edge axis (world)
+    const vx = -Math.sin(rad), vy = Math.cos(rad);  // +y edge axis (world)
+    const sx = corner.includes('e') ? 1 : -1;
+    const sy = corner.includes('s') ? 1 : -1;
+    const cx0 = (tl0[0] + br0[0]) / 2, cy0 = (tl0[1] + br0[1]) / 2;
+    const hw0 = (br0[0] - tl0[0]) / 2, hh0 = (br0[1] - tl0[1]) / 2;
+    // Fixed (opposite) corner, pinned in world space for the whole drag.
+    const fLocalX = -sx * hw0, fLocalY = -sy * hh0;
+    const fx = cx0 + fLocalX * ux + fLocalY * vx;
+    const fy = cy0 + fLocalX * uy + fLocalY * vy;
 
     const onMove = (ev) => {
       ev.preventDefault();
       const p = screenToImage(ev.clientX, ev.clientY, displayRef.current);
-      let [l, t] = origTL;
-      let [r, b] = origBR;
-      if (corner.includes('w')) l = Math.min(p.x, r - MIN);
-      if (corner.includes('e')) r = Math.max(p.x, l + MIN);
-      if (corner.includes('n')) t = Math.min(p.y, b - MIN);
-      if (corner.includes('s')) b = Math.max(p.y, t + MIN);
+      const vecX = p.x - fx, vecY = p.y - fy;
+      const W = Math.max(MIN, sx * (vecX * ux + vecY * uy));
+      const H = Math.max(MIN, sy * (vecX * vx + vecY * vy));
+      // New centre = fixed corner + half-diagonal toward the dragged corner.
+      const ncx = fx + (sx * W / 2) * ux + (sy * H / 2) * vx;
+      const ncy = fy + (sx * W / 2) * uy + (sy * H / 2) * vy;
+      const nhw = W / 2, nhh = H / 2;
       setEditDets(prev => {
         const next = [...prev];
         next[index] = {
           ...next[index],
-          topLeft: [l, t],
-          bottomRight: [r, b],
-          origHw: (r - l) / 2,
-          origHh: (b - t) / 2,
+          topLeft: [ncx - nhw, ncy - nhh],
+          bottomRight: [ncx + nhw, ncy + nhh],
+          origHw: nhw,
+          origHh: nhh,
         };
         return next;
       });
@@ -994,6 +1006,12 @@ export default function MaskEditorScreen() {
   const isFreehand = blurSubMode === 'freehand';
   const selectedDet = selectedOvalIdx !== null ? editDets[selectedOvalIdx] : null;
   const selectedSticker = selectedDet && selectedDet.kind === 'sticker' ? selectedDet : null;
+  const selectedBlurRegion = selectedDet && selectedDet.kind !== 'sticker' ? selectedDet : null;
+  // Rotate a blur region (oval/rect) around its centre. Kept separate from
+  // the sticker's barAngle since a region carries its own `angle` field.
+  const setRegionAngle = (angle) => {
+    setEditDets((prev) => prev.map((d, i) => (i === selectedOvalIdx ? { ...d, angle } : d)));
+  };
   const stickerOn = !!blurSettings.stickerEnabled; // freehand color-brush flag
   const curStickerStyle = selectedSticker ? (selectedSticker.barStyle || 'solid') : (blurSettings.barStyle || 'solid');
   const curStickerColor = selectedSticker ? (selectedSticker.barColor || '#000000') : (blurSettings.barColor || '#000000');
@@ -1205,6 +1223,23 @@ export default function MaskEditorScreen() {
                 max="45"
                 value={selectedSticker.barAngle ?? 0}
                 onChange={(e) => updateSelectedSticker({ barAngle: parseInt(e.target.value, 10) })}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+      {/* Rotate a selected blur region (oval/rectangle) about its centre. */}
+      {selectedBlurRegion && (
+        <div className="toolbar-row">
+          <div className="toolbar-group toolbar-group-slider">
+            <label className="toolbar-slider">
+              <span>Angle</span>
+              <input
+                type="range"
+                min="-90"
+                max="90"
+                value={selectedBlurRegion.angle ?? 0}
+                onChange={(e) => setRegionAngle(parseInt(e.target.value, 10))}
               />
             </label>
           </div>
@@ -1563,6 +1598,7 @@ export default function MaskEditorScreen() {
                   top: `${(det.topLeft[1] / imgH) * 100}%`,
                   width: `${((det.bottomRight[0] - det.topLeft[0]) / imgW) * 100}%`,
                   height: `${((det.bottomRight[1] - det.topLeft[1]) / imgH) * 100}%`,
+                  transform: (det.kind !== 'sticker' && det.angle) ? `rotate(${det.angle}deg)` : undefined,
                   pointerEvents: category === 'blur' ? 'auto' : 'none',
                 }}
                 onPointerDown={category === 'blur' ? (e) => handleFaceDragDown(e, i) : undefined}
