@@ -1,13 +1,20 @@
 /**
- * Rewarded video ad integration via AppLixir (v6 SDK).
+ * Rewarded video ad integration.
+ *
+ * Platform split: NATIVE (Capacitor) uses AdMob (see admobAds.js); WEB/PWA
+ * uses AppLixir (below). Both return the identical
+ *   { completed: boolean, reason: string }
+ * contract, so callers (PaywallModal, BatchGridScreen) don't branch.
  *
  * To disable:  set REWARDED_ADS_ENABLED = false (everything no-ops).
  * To remove:   delete this file and remove the 3-line gate in
  *              MaskEditorScreen.jsx handleApply().
  *
- * Current config uses test mode. After AppLixir approval, swap
- * to your production zone.
+ * AppLixir config uses test mode. After AppLixir approval, swap to the
+ * production zone.
  */
+
+import { isNativeApp } from './platform';
 
 // ── Feature flag ──────────────────────────────────────────────
 export const REWARDED_ADS_ENABLED = true;
@@ -42,6 +49,15 @@ const AD_TIMEOUT = 45_000;
 export function showRewardedAd() {
   if (!REWARDED_ADS_ENABLED) {
     return Promise.resolve({ completed: false, reason: 'disabled' });
+  }
+
+  // Native shells serve AdMob rewarded video instead of AppLixir. The module
+  // (and the AdMob plugin) is dynamically imported so it never enters the web
+  // bundle, and returns the same { completed, reason } shape.
+  if (isNativeApp()) {
+    return import('./admobAds')
+      .then((m) => m.showAdMobRewarded())
+      .catch(() => ({ completed: false, reason: 'no-sdk' }));
   }
 
   if (typeof window.initializeAndOpenPlayer !== 'function') {

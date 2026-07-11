@@ -41,11 +41,22 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- AdMob application ID. SCAFFOLD: this is Google's official TEST app
+             ID (serves test ads only). Replace with your real AdMob app ID
+             (ca-app-pub-XXXX~YYYY) before shipping real ads. Without this
+             meta-data the app crashes on AdMob init. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713" />
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Advertising ID, required by AdMob. Pairs with the Play Console
+         "Advertising ID" declaration being set to Yes. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
     <!-- Camera + photo access. CAMERA is requested at runtime when the
          user taps "Take photo". On Android 13+ the photo picker doesn't
          require READ_MEDIA_IMAGES, so we hold off declaring it here until
