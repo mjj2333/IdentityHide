@@ -5,16 +5,23 @@
  * isNativeApp() and only calls in the native shell, and the plugin is
  * dynamically imported here so it stays out of the web bundle entirely.
  *
- * SCAFFOLD STATE: uses Google's official TEST ad unit ID, which always serves
+ * SCAFFOLD STATE: uses Google's official TEST ad unit IDs, which always serve
  * test ads with zero policy risk. Before shipping real ads, swap:
- *   1. REWARDED_AD_ID below, and
- *   2. the APPLICATION_ID meta-data in
- *      android/app/src/main/AndroidManifest.xml
- * for your real AdMob unit + app IDs. Android only for now (iOS adds ATT).
+ *   1. REWARDED_AD_IDS below (per platform), and
+ *   2. the AdMob app-id meta-data in the native projects
+ *      (android/app/src/main/AndroidManifest.xml APPLICATION_ID, and the iOS
+ *      Info.plist GADApplicationIdentifier)
+ * for your real AdMob unit + app IDs.
  */
+import { getNativePlatform } from './platform';
 
-// Google's official Android TEST rewarded ad unit (safe placeholder).
-const REWARDED_AD_ID = 'ca-app-pub-3940256099942544/5224354917';
+// Google's official TEST rewarded ad units (safe placeholders), one per
+// platform — iOS and Android have distinct unit IDs. getNativePlatform()
+// selects at show time; falls back to Android if platform is unknown.
+const REWARDED_AD_IDS = {
+  android: 'ca-app-pub-3940256099942544/5224354917',
+  ios: 'ca-app-pub-3940256099942544/1712485313',
+};
 
 // Reward-video safety ceiling: if prepare/show stalls, let the user through
 // with completed:false, matching the AppLixir path's behaviour.
@@ -30,6 +37,21 @@ export async function initAdMob() {
   if (initialized) return;
   try {
     const { AdMob, AdmobConsentStatus } = await import('@capacitor-community/admob');
+    // iOS App Tracking Transparency: Apple requires the ATT prompt before any
+    // IDFA use. Gated to iOS so Android's path is unchanged (Android doesn't
+    // use ATT). NOTE: requires NSUserTrackingUsageDescription in the iOS
+    // Info.plist (Phase 1) or iOS terminates the app on this call. Best-effort:
+    // a failure here must not block init or ad serving.
+    if (getNativePlatform() === 'ios') {
+      try {
+        const { status } = await AdMob.trackingAuthorizationStatus();
+        if (status === 'notDetermined') {
+          await AdMob.requestTrackingAuthorization();
+        }
+      } catch (e) {
+        console.warn('[admob] ATT prompt skipped:', e?.message || e);
+      }
+    }
     await AdMob.initialize();
     try {
       const info = await AdMob.requestConsentInfo();
@@ -86,7 +108,8 @@ export async function showAdMobRewarded() {
         listeners.push(await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => done(earned ? 'rewarded' : 'dismissed')));
         listeners.push(await AdMob.addListener(RewardAdPluginEvents.FailedToShow, () => done('error:show')));
         listeners.push(await AdMob.addListener(RewardAdPluginEvents.FailedToLoad, () => done('error:load')));
-        await AdMob.prepareRewardVideoAd({ adId: REWARDED_AD_ID });
+        const adId = REWARDED_AD_IDS[getNativePlatform()] || REWARDED_AD_IDS.android;
+        await AdMob.prepareRewardVideoAd({ adId });
         await AdMob.showRewardVideoAd();
       } catch (err) {
         done('error:' + (err?.message || 'unknown'));
