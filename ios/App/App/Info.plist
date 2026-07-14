@@ -48,10 +48,15 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Redact.ID uses the camera only when you choose to take a photo to redact. Images are processed on your device — they're never uploaded.</string>
+	<string>Redact.ID uses the camera only when you choose to take a photo to redact. Blurring and redaction happen on your device; if you use the optional AI tattoo-removal feature, that image is sent to our secure server to process.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Redact.ID needs access to pick photos from your library so you can blur faces or remove identifying details. Photos stay on your device.</string>
+	<string>Redact.ID accesses your library only for the photos you pick to blur or redact. Editing happens on your device; the optional AI tattoo-removal feature sends the selected image to our secure server to process.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Redact.ID saves your redacted photo back to your library when you tap Save. Originals are never modified.</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>Redact.ID uses this to show more relevant ads and support the free tier. Rewarded ads still work if you decline.</string>
+	<!-- iOS AdMob app id: Google's official TEST id (serves test ads, zero policy risk). Swap to the real iOS app id before shipping real ads, alongside REWARDED_AD_IDS.ios in src/utils/admobAds.js. -->
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-3940256099942544~1458002511</string>
 </dict>
 </plist>
