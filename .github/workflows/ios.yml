@@ -34,9 +34,9 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
-      # Build the web bundle and copy it into the iOS project. This also runs
-      # `pod install` using the runner's preinstalled CocoaPods (system Ruby),
-      # BEFORE we switch Ruby for Fastlane below.
+      # Build the web bundle and copy it into the iOS project. This project uses
+      # Swift Package Manager (not CocoaPods), so cap sync just updates the SPM
+      # package list + web assets; xcodebuild resolves packages at build time.
       - name: Build web bundle + sync iOS
         run: |
           npm run build

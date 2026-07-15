@@ -20,7 +20,9 @@ platform :ios do
     run_number = ENV.fetch("GITHUB_RUN_NUMBER", "1")
 
     build_app(
-      workspace: "App.xcworkspace",
+      # SPM project (no CocoaPods/workspace) — build the .xcodeproj directly.
+      # xcodebuild resolves the Swift Package dependencies at build time.
+      project: "App.xcodeproj",
       scheme: "App",
       export_method: "app-store",
       # -allowProvisioningUpdates lets xcodebuild create/download the
