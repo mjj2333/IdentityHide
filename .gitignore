@@ -64,6 +64,14 @@ ios/**/xcuserdata/
 ios/**/*.xcworkspace/xcuserdata/
 ios/App/Podfile.lock
 
+# Fastlane (CI) build artifacts
+ios/App/fastlane/report.xml
+ios/App/fastlane/Preview.html
+ios/App/fastlane/test_output/
+ios/App/vendor/bundle/
+ios/App/*.ipa
+ios/App/*.dSYM.zip
+
 # Android / Capacitor build artifacts. Same idea as iOS: the Gradle project
 # is checked in, but generated and machine-specific pieces are not.
 android/app/build/
