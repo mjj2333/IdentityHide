@@ -65,6 +65,7 @@ ios/**/*.xcworkspace/xcuserdata/
 ios/App/Podfile.lock
 
 # Fastlane (CI) build artifacts
+ios/App/fastlane/*.p8
 ios/App/fastlane/report.xml
 ios/App/fastlane/Preview.html
 ios/App/fastlane/test_output/
