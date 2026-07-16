@@ -1961,6 +1961,16 @@ textarea:focus-visible,
   min-height: var(--editor-toolbar-height);
 }
 
+/* iOS native ONLY (scoped via .platform-ios on <html>, set in main.jsx; PWA +
+   Android untouched). Measured on-device: the app column runs ~safe-area-bottom
+   taller than the visible viewport, so the bottom toolbar's safe-area padding
+   falls off-screen and the category tabs (Auto Blur / Tattoo Removal) end up
+   behind the home indicator. Pad the tabs up by the bottom inset so the buttons
+   clear it. */
+.platform-ios .toolbar-tabs {
+  padding-bottom: var(--safe-area-bottom);
+}
+
 .mask-editor-toolbar-body {
   min-height: 0;
   overflow-y: auto;
