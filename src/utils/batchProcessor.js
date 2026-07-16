@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { fileToCanvas, downscaleToMegapixels, canvasToBlob, capToMaxDimension } from './imageHelpers';
+import { fileToCanvas, fileToWorkingCanvas, downscaleToMegapixels, canvasToBlob, capToMaxDimension } from './imageHelpers';
 import { getMaxWorkingDimension } from './platform';
 import { applyMaskedBlur, stackBlur, migrateBlurSettings, drawRegionMask } from './blurEngine';
 import { extractMetadata } from './metadataExtractor';
@@ -70,42 +70,30 @@ export function canvasToBlobUrl(canvas) {
  * Returns { strippedCanvas, thumbnailCanvas, thumbnailUrl, exifSummary }.
  */
 export async function prepareImage(file, tierMP = 1) {
-  // TEMP: `stage` tags which step throws, so the surfaced batch error tells us
-  // exactly where iOS fails (decode / downscale / thumbnail). Remove once the
-  // batch-memory bug is nailed.
+  // `stage` tags which step throws so a surfaced batch error pinpoints where
+  // iOS fails (decode / thumbnail). Kept while we confirm the fix on device.
   let stage = 'decode';
   try {
-  // Extract metadata in parallel with the canvas decode — they both read
-  // the same file but different parts, so running concurrently saves a
-  // small amount of latency per image.
-  const [fullCanvas, metadata] = await Promise.all([
-    fileToCanvas(file),
-    extractMetadata(file).catch(() => null),
-  ]);
-  stage = 'downscale';
-  const { canvas: tierCanvas } = downscaleToMegapixels(fullCanvas, tierMP);
-  // Free full-res canvas (batch doesn't need it — we re-export at working resolution)
-  fullCanvas.width = 0;
-  fullCanvas.height = 0;
-  // Cap the editing canvas on memory-constrained devices (same reason as the
-  // single-image path — keeps iOS from running out of canvas memory).
-  const cap = capToMaxDimension(tierCanvas, getMaxWorkingDimension());
-  const strippedCanvas = cap.canvas;
-  if (cap.scaled) {
-    tierCanvas.width = 0;
-    tierCanvas.height = 0;
-  }
-  stage = 'thumbnail';
-  const thumbnailCanvas = createThumbnail(strippedCanvas);
-  const thumbnailUrl = await canvasToBlobUrl(thumbnailCanvas);
-  // `hadLocation` is only meaningful for JPEGs — extractMetadata returns
-  // readable:false for PNG/HEIC/WebP, so we can't confirm presence either
-  // way for those. The UI treats unreadable as "no detected location".
-  const exifSummary = {
-    readable: metadata?.readable !== false,
-    hadLocation: !!metadata?.gps,
-  };
-  return { strippedCanvas, thumbnailCanvas, thumbnailUrl, exifSummary };
+    // Decode straight into the capped working-resolution canvas — never
+    // allocate a full-res intermediate. That intermediate (~195 MB for a 48 MP
+    // photo) is what accumulated in iOS's canvas-memory pool across a batch and
+    // made toBlob throw InvalidStateError. extractMetadata reads file bytes in
+    // parallel (different data, no canvas cost).
+    const [strippedCanvas, metadata] = await Promise.all([
+      fileToWorkingCanvas(file, tierMP, getMaxWorkingDimension()),
+      extractMetadata(file).catch(() => null),
+    ]);
+    stage = 'thumbnail';
+    const thumbnailCanvas = createThumbnail(strippedCanvas);
+    const thumbnailUrl = await canvasToBlobUrl(thumbnailCanvas);
+    // `hadLocation` is only meaningful for JPEGs — extractMetadata returns
+    // readable:false for PNG/HEIC/WebP, so we can't confirm presence either
+    // way for those. The UI treats unreadable as "no detected location".
+    const exifSummary = {
+      readable: metadata?.readable !== false,
+      hadLocation: !!metadata?.gps,
+    };
+    return { strippedCanvas, thumbnailCanvas, thumbnailUrl, exifSummary };
   } catch (e) {
     throw new Error(`${stage}: ${e?.message || e}`);
   }

@@ -31,6 +31,70 @@ export function fileToCanvas(file, timeoutMs = 30000) {
 }
 
 /**
+ * Decode a File directly into a working-resolution canvas, capped by megapixels
+ * (tierMP) AND longest-side (maxDim), aligned to /16. Unlike fileToCanvas it
+ * draws the decoded <img> STRAIGHT into the small target canvas and never
+ * allocates a full-resolution one. On iOS that full-res intermediate (e.g.
+ * ~195 MB for a 48 MP photo) is what exhausts the WKWebView canvas-memory pool
+ * across a batch — skipping it keeps the pool tiny so toBlob/thumbnails don't
+ * throw InvalidStateError. The browser applies EXIF orientation when drawing an
+ * <img> to canvas, same as fileToCanvas.
+ */
+export function fileToWorkingCanvas(file, tierMP = 1, maxDim = 4096, timeoutMs = 30000) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    const timer = setTimeout(() => {
+      img.onload = img.onerror = null;
+      URL.revokeObjectURL(url);
+      reject(new Error('Image load timed out'));
+    }, timeoutMs);
+    img.onload = () => {
+      clearTimeout(timer);
+      try {
+        const iw = img.naturalWidth || img.width;
+        const ih = img.naturalHeight || img.height;
+        let tw = iw, th = ih;
+        const mp = (iw * ih) / 1_000_000;
+        if (tierMP && Number.isFinite(tierMP) && mp > tierMP) {
+          const s = Math.sqrt(tierMP / mp);
+          tw *= s; th *= s;
+        }
+        const longest = Math.max(tw, th);
+        if (maxDim && longest > maxDim) {
+          const s = maxDim / longest;
+          tw *= s; th *= s;
+        }
+        // Align to /16 (matches downscaleToMegapixels; Flux VAE stride).
+        tw = Math.max(16, Math.round(tw / 16) * 16);
+        th = Math.max(16, Math.round(th / 16) * 16);
+        const canvas = document.createElement('canvas');
+        canvas.width = tw;
+        canvas.height = th;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, tw, th); // decode + downscale in one draw
+        // Release the decoded bitmap ASAP — iOS holds it otherwise.
+        img.onload = img.onerror = null;
+        img.src = '';
+        URL.revokeObjectURL(url);
+        resolve(canvas);
+      } catch (e) {
+        URL.revokeObjectURL(url);
+        reject(e);
+      }
+    };
+    img.onerror = () => {
+      clearTimeout(timer);
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image'));
+    };
+    img.src = url;
+  });
+}
+
+/**
  * Promise wrapper around canvas.toBlob
  */
 export function canvasToBlob(canvas, format = 'image/png', quality = 0.92) {
