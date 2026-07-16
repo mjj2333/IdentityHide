@@ -37,8 +37,8 @@ export default function TermsScreen({ onBack }) {
             Redact.ID is a privacy tool that helps you blur faces and remove
             tattoos from images you upload. Face detection and initial
             processing run in your browser. Tattoo removal is processed on our
-            servers and the image is deleted immediately after processing
-            completes.
+            servers, which use your image only to produce and return your
+            result.
           </p>
         </section>
 

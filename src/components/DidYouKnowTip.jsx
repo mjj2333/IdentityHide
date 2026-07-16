@@ -14,7 +14,7 @@ const DID_YOU_KNOW = [
   'Metadata stripping removes GPS coordinates, camera model, timestamps, and software signatures.',
   'AI-powered recognition can match faces, tattoos, and other subtle features — even in photos that look anonymous.',
   'Tattoo removal uses AI inpainting to reconstruct what skin would look like underneath.',
-  'Your tattoo mask is processed in memory on our server, then discarded immediately — never written to disk.',
+  'Tattoo removal runs on our server; we use your image only to return your result, never to train AI or share it.',
   'EXIF timestamps reveal routines: when you are home, when you travel, when you sleep. Stripping them breaks that map.',
   'EXIF data embedded in a single photo can reveal your location, device, and exact moment of capture.',
   'Pinch to zoom in for finer tattoo masks — precision helps the AI fill in realistic skin.',

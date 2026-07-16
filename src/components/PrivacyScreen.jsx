@@ -11,7 +11,7 @@ import { useDocumentMeta } from '../hooks/useDocumentMeta';
 export default function PrivacyScreen({ onBack }) {
   useDocumentMeta({
     title: 'Privacy Policy — Redact.ID',
-    description: 'Privacy policy for Redact.ID. Photos are processed in your browser; nothing is uploaded except for the small region you mark for tattoo removal, which is processed in memory and discarded immediately.',
+    description: 'Privacy policy for Redact.ID. Face blur and metadata stripping run in your browser. Only AI tattoo removal sends your image to our server, used solely to return your result, never shared or used to train AI.',
     canonical: 'https://redactid.app/privacy',
     // Swap to /og/privacy.png once a per-route image is designed.
     ogImage: 'https://redactid.app/og-image.png',
@@ -55,15 +55,14 @@ export default function PrivacyScreen({ onBack }) {
           <h2>3. Server Processing</h2>
           <p>
             Tattoo removal requires AI processing that cannot yet run in-browser.
-            When you use this feature, the relevant portion of your image is sent
-            to our processing server. <strong>Your image is processed in memory
-            and is never written to disk or stored on the server.</strong> Once
-            the result is returned to your browser, no copy remains on our
-            infrastructure.
+            When you use this feature, your image and the mask you draw are sent
+            to our processing server, where an AI model fills in the area you
+            marked and returns the edited image to your browser.
           </p>
           <p>
-            We do not retain, log, cache, or use your images for any purpose
-            beyond delivering the immediate processing result back to you.
+            We use these images solely to generate and return your result. We do
+            not sell them, share them with third parties, or use them to train
+            AI models.
           </p>
         </section>
 

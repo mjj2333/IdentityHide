@@ -14,7 +14,7 @@ const FAQ_DATA = [
     questions: [
       {
         q: 'Where are my photos stored?',
-        a: 'Face blur, mask editing, metadata stripping, and export all run entirely in your browser — nothing leaves your device. Tattoo removal is the one exception: the relevant image region is sent to our processing server, processed in memory (never written to disk), and discarded as soon as the result comes back. A temporary copy of your in-progress session is also cached locally in your browser (IndexedDB) for up to 4 hours so you can resume interrupted work. See the Privacy Policy for full detail.',
+        a: 'Face blur, mask editing, metadata stripping, and export all run entirely in your browser, so nothing leaves your device. Tattoo removal is the one exception: your image is sent to our processing server, where an AI model fills in the area you marked and returns the result. We use it only to produce that result, never to train AI or share with anyone. A temporary copy of your in-progress session is also cached locally in your browser (IndexedDB) for up to 4 hours so you can resume interrupted work. See the Privacy Policy for full detail.',
       },
       {
         q: 'How does the app use AI?',
@@ -23,12 +23,12 @@ const FAQ_DATA = [
             <p>AI is used for two key functions:</p>
             <ul>
               <li>Face detection and blurring — runs entirely in your browser using a small on-device model</li>
-              <li>Tattoo removal — the masked region of your image is sent to our processing server, where AI inpainting fills the area; the server processes it in memory and discards it immediately</li>
+              <li>Tattoo removal — your image is sent to our processing server, where AI inpainting fills in the area you marked and returns the result; we use it only to produce that result, never to train AI or share it</li>
             </ul>
             <p>Everything else — mask editing, metadata stripping, and export — stays on your device.</p>
           </>
         ),
-        aHtml: '<p>AI is used for two key functions:</p><ul><li>Face detection and blurring — runs entirely in your browser using a small on-device model</li><li>Tattoo removal — the masked region of your image is sent to our processing server, where AI inpainting fills the area; the server processes it in memory and discards it immediately</li></ul><p>Everything else — mask editing, metadata stripping, and export — stays on your device.</p>',
+        aHtml: '<p>AI is used for two key functions:</p><ul><li>Face detection and blurring — runs entirely in your browser using a small on-device model</li><li>Tattoo removal — your image is sent to our processing server, where AI inpainting fills in the area you marked and returns the result; we use it only to produce that result, never to train AI or share it</li></ul><p>Everything else — mask editing, metadata stripping, and export — stays on your device.</p>',
       },
       {
         q: 'What do I get with the premium plan? (Coming soon)',
