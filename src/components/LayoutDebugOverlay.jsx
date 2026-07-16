@@ -13,10 +13,9 @@ export default function LayoutDebugOverlay() {
 
   useEffect(() => {
     const targets = [
-      ['canvas', '.mask-editor-canvas-container'],
       ['toolbar', '.mask-editor-toolbar'],
-      ['body', '.mask-editor-toolbar-body'],
       ['tabs', '.toolbar-tabs'],
+      ['tabBtn', '.toolbar-tab'],
     ];
     const tick = () => {
       const lines = targets.map(([label, sel]) => {
@@ -27,9 +26,8 @@ export default function LayoutDebugOverlay() {
       });
       const cs = getComputedStyle(document.documentElement);
       const safe = cs.getPropertyValue('--safe-area-bottom').trim();
-      const appH = cs.getPropertyValue('--app-height').trim();
-      const vvH = window.visualViewport ? Math.round(window.visualViewport.height) : '?';
-      setTxt(`winH=${window.innerHeight} vvH=${vvH} appH=${appH} safeBot=${safe}\n${lines.join('\n')}`);
+      const safeLine = window.innerHeight - (parseFloat(safe) || 0);
+      setTxt(`winH=${window.innerHeight} safeBot=${safe} homeLine=${safeLine}\n${lines.join('\n')}`);
     };
     tick();
     const id = setInterval(tick, 500);

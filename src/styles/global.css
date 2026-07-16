@@ -1968,7 +1968,7 @@ textarea:focus-visible,
    behind the home indicator. Pad the tabs up by the bottom inset so the buttons
    clear it. */
 .platform-ios .toolbar-tabs {
-  padding-bottom: var(--safe-area-bottom);
+  padding-bottom: calc(var(--safe-area-bottom) + 12px);
 }
 
 .mask-editor-toolbar-body {
