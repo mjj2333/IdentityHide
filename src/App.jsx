@@ -12,10 +12,11 @@ import ConfirmModal from './components/ConfirmModal';
 import { usePwaUpdate } from './hooks/usePwaUpdate';
 import { captureException } from './utils/sentry';
 import { track } from './utils/analytics';
-import { isNativeApp } from './utils/platform';
+import { isNativeApp, getNativePlatform } from './utils/platform';
 import DeepLinkHandler from './components/DeepLinkHandler';
 import BackButtonHandler from './components/BackButtonHandler';
 import StatusBarConfig from './components/StatusBarConfig';
+import LayoutDebugOverlay from './components/LayoutDebugOverlay';
 import './styles/global.css';
 
 const MaskEditorScreen = lazy(() => import('./components/MaskEditorScreen'));
@@ -375,6 +376,7 @@ export default function App() {
           {updatePrompt}
         </BatchProvider>
       </PipelineProvider>
+      {getNativePlatform() === 'ios' && <LayoutDebugOverlay />}
     </EntitlementProvider>
   );
 }
