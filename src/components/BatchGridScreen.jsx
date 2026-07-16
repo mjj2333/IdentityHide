@@ -424,7 +424,7 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
       case 'done':
         return <span className="batch-badge batch-badge-green">Done</span>;
       case 'error':
-        return <span className="batch-badge batch-badge-red" title={img.error || 'Unknown error'}>Error</span>;
+        return <span className="batch-badge batch-badge-red" style={{ whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.15, maxWidth: 120 }} title={img.error || 'Unknown error'}>{img.error || 'Error'}</span>;
       default:
         return null;
     }
