@@ -16,6 +16,14 @@ import { track } from '../utils/analytics';
 const DEFAULT_WORKING_MP = 1;
 const MASK_ALPHA_THRESHOLD = 128;
 
+// GPU-safe cap for the resolution sent to the Flux Fill tattoo-removal model.
+// Flux is trained near ~1MP and both its quality and VRAM cost blow up past
+// ~2MP, so we downscale the image + mask to this before the ComfyUI upload.
+// Applies ONLY on the inpaint path (a tattoo mask exists) — face-blur-only
+// exports never touch this and keep full resolution. One value for every
+// platform, since it's a property of the shared GPU backend, not the client.
+const INPAINT_MAX_MP = 2;
+
 export function useImagePipeline() {
   const {
     setMetadata,
@@ -176,19 +184,29 @@ export function useImagePipeline() {
       // --- Step A: ComfyUI tattoo inpainting at 1MP ---
       if (hasMask) {
         checkAborted();
-        if (onProgress) onProgress({ message: 'Uploading image...', fraction: 0.05 });
-        const imageName = await uploadImage(src, 'redactid_input.png', { signal });
-        checkAborted();
-        console.log(`[PIPELINE] Uploaded image: ${imageName} (${src.width}x${src.height})`);
 
-        // Resize mask to exactly match source dimensions (they can diverge after multi-pass)
+        // Cap the resolution sent to the GPU. downscaleToMegapixels returns the
+        // original canvas untouched when it's already within the cap, and aligns
+        // to /16 for the Flux VAE. The inpaint result stays at this resolution
+        // (no upscale-back), so tattoo-removed exports top out at ~INPAINT_MAX_MP.
+        const { canvas: inpaintSrc } = downscaleToMegapixels(src, INPAINT_MAX_MP);
+        if (inpaintSrc !== src) {
+          console.log(`[PIPELINE] Inpaint cap ${src.width}x${src.height} → ${inpaintSrc.width}x${inpaintSrc.height} (${INPAINT_MAX_MP}MP)`);
+        }
+
+        if (onProgress) onProgress({ message: 'Uploading image...', fraction: 0.05 });
+        const imageName = await uploadImage(inpaintSrc, 'redactid_input.png', { signal });
+        checkAborted();
+        console.log(`[PIPELINE] Uploaded image: ${imageName} (${inpaintSrc.width}x${inpaintSrc.height})`);
+
+        // Resize mask to exactly match the inpaint image dimensions
         let maskToUpload = customTattooMask;
-        if (customTattooMask.width !== src.width || customTattooMask.height !== src.height) {
-          console.log(`[PIPELINE] Resizing mask ${customTattooMask.width}x${customTattooMask.height} → ${src.width}x${src.height}`);
+        if (customTattooMask.width !== inpaintSrc.width || customTattooMask.height !== inpaintSrc.height) {
+          console.log(`[PIPELINE] Resizing mask ${customTattooMask.width}x${customTattooMask.height} → ${inpaintSrc.width}x${inpaintSrc.height}`);
           const resized = document.createElement('canvas');
-          resized.width = src.width;
-          resized.height = src.height;
-          resized.getContext('2d').drawImage(customTattooMask, 0, 0, src.width, src.height);
+          resized.width = inpaintSrc.width;
+          resized.height = inpaintSrc.height;
+          resized.getContext('2d').drawImage(customTattooMask, 0, 0, inpaintSrc.width, inpaintSrc.height);
           maskToUpload = resized;
         }
 
@@ -218,18 +236,22 @@ export function useImagePipeline() {
         console.log(`[PIPELINE] Inpaint result: ${resultCanvas.width}x${resultCanvas.height}`);
 
         // ComfyUI may return a slightly different resolution (VAE rounding).
-        // Resize back to match our working resolution so everything stays aligned.
-        if (resultCanvas.width !== src.width || resultCanvas.height !== src.height) {
-          console.log(`[PIPELINE] Resizing result ${resultCanvas.width}x${resultCanvas.height} → ${src.width}x${src.height}`);
+        // Align to the inpaint dimensions (NOT the full src — the inpaint output
+        // deliberately stays at the capped resolution).
+        if (resultCanvas.width !== inpaintSrc.width || resultCanvas.height !== inpaintSrc.height) {
+          console.log(`[PIPELINE] Resizing result ${resultCanvas.width}x${resultCanvas.height} → ${inpaintSrc.width}x${inpaintSrc.height}`);
           const resized = document.createElement('canvas');
-          resized.width = src.width;
-          resized.height = src.height;
+          resized.width = inpaintSrc.width;
+          resized.height = inpaintSrc.height;
           const rctx = resized.getContext('2d');
           rctx.imageSmoothingEnabled = true;
           rctx.imageSmoothingQuality = 'high';
-          rctx.drawImage(resultCanvas, 0, 0, src.width, src.height);
+          rctx.drawImage(resultCanvas, 0, 0, inpaintSrc.width, inpaintSrc.height);
           resultCanvas = resized;
         }
+
+        // Free the capped copy if downscaleToMegapixels allocated a new one.
+        if (inpaintSrc !== src) { inpaintSrc.width = 0; inpaintSrc.height = 0; }
       } else {
         // No tattoo mask — copy source
         resultCanvas = document.createElement('canvas');
