@@ -3,7 +3,7 @@
   "appName": "Redact.ID",
   "webDir": "dist",
   "ios": {
-    "contentInset": "always",
+    "contentInset": "never",
     "scheme": "Redact.ID",
     "backgroundColor": "#0d0c0a"
   },
