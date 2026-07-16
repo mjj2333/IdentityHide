@@ -58,5 +58,11 @@
 	<!-- iOS AdMob app id: Google's official TEST id (serves test ads, zero policy risk). Swap to the real iOS app id before shipping real ads, alongside REWARDED_AD_IDS.ios in src/utils/admobAds.js. -->
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-3940256099942544~1458002511</string>
+	<!-- Export compliance: Redact.ID uses only standard/exempt encryption
+	     (HTTPS/TLS), so it declares no non-exempt encryption. This clears the
+	     "Missing Compliance" gate automatically on every TestFlight / App Store
+	     upload, so builds distribute without a manual click each time. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
