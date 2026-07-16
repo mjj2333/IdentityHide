@@ -97,13 +97,20 @@ export default function AccountScreen({ onBack }) {
               >
                 Redeem a promo code
               </button>
-              <button
-                className="btn btn-ghost"
-                onClick={() => setShowSignIn(true)}
-                disabled={busy}
-              >
-                Already subscribed? Sign in
-              </button>
+              {/* Sign-in restores a web (Stripe) subscription by email. Hidden
+                  in the native shells: Apple 3.1.3(b) only permits accessing a
+                  subscription bought elsewhere if it's also an in-app purchase,
+                  and there's no IAP yet — so on iOS/Android premium comes via
+                  promo codes only. Revisit when cross-platform IAP lands. */}
+              {canPurchase && (
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => setShowSignIn(true)}
+                  disabled={busy}
+                >
+                  Already subscribed? Sign in
+                </button>
+              )}
             </div>
           </section>
         )}
