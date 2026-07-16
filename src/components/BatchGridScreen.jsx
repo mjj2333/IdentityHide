@@ -23,6 +23,14 @@ function makeId() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+// An image is editable/processable once detection has run. The full canvas is
+// no longer retained (iOS memory) — presence of strippedCanvas is NOT the
+// readiness signal; status is.
+function isReady(img) {
+  return img.status === 'ready' || img.status === 'no-faces'
+    || img.status === 'edited' || img.status === 'done';
+}
+
 export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
   const {
     images, setImages, addImages, removeImage, updateImage,
@@ -90,16 +98,28 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
         try {
           const { strippedCanvas, thumbnailCanvas, thumbnailUrl, exifSummary } = await prepareImage(img.file, selectedTierMP);
           const detections = await detect(strippedCanvas);
+          const srcW = strippedCanvas.width;
+          const srcH = strippedCanvas.height;
+          // Free the full working canvas right after detection. On iOS the
+          // accumulated per-image canvases blow the WKWebView canvas-memory
+          // ceiling and the next decode throws InvalidStateError. We keep only
+          // the small clean thumbnail + detections + source dims, and re-derive
+          // the full canvas from the file on demand (open-to-edit / process).
+          strippedCanvas.width = 0;
+          strippedCanvas.height = 0;
           updateImage(img.id, {
             status: detections.length > 0 ? 'ready' : 'no-faces',
-            strippedCanvas,
+            strippedCanvas: null,
+            cleanThumbCanvas: thumbnailCanvas,
             thumbnailCanvas,
             thumbnailUrl,
             detections,
+            srcW,
+            srcH,
             exifSummary,
           });
         } catch (err) {
-          console.warn('[Batch] Detection failed for', img.file.name, err);
+          console.warn('[Batch] Prepare/detect failed for', img.file.name, err);
           updateImage(img.id, { status: 'error', error: err.message });
         }
       }
@@ -118,7 +138,7 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
   useEffect(() => {
     const timer = setTimeout(() => {
       const eligible = images.filter(img =>
-        img.status === 'ready' && img.strippedCanvas && img.detections?.length > 0
+        img.status === 'ready' && img.cleanThumbCanvas && img.detections?.length > 0
         && img._blurKey !== settingsKey
       );
       if (eligible.length === 0) return;
@@ -130,14 +150,21 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
         for (let i = 0; i < eligible.length; i++) {
           const img = eligible[i];
           if (regenCancelRef.current) return;
-          const w = img.strippedCanvas.width, h = img.strippedCanvas.height;
-          const blurMask = wantBlur ? buildFaceMask(img.detections, w, h, mode, globalFeather) : null;
+          // Blur the small clean thumbnail (we no longer retain full canvases).
+          // Detections are in full-res (srcW×srcH) space, so scale them down to
+          // the thumbnail via buildFaceMask's `scale` param.
+          const base = img.cleanThumbCanvas;
+          const tw = base.width, th = base.height;
+          const scale = tw / (img.srcW || tw);
+          const blurMask = wantBlur
+            ? buildFaceMask(img.detections, tw, th, mode, Math.round(globalFeather * scale), null, scale)
+            : null;
           // Grid thumbnails show the global blur only; stickers are placed
-          // per-image in the editor, so no sticker objects here.
-          const blurred = applyMaskedBlur(img.strippedCanvas, blurMask, wantBlur ? mode : 'none', strength, [], null, globalBlurSettings.barColor || '#000000');
-          const thumbCanvas = createThumbnail(blurred);
+          // per-image in the editor, so no sticker objects here. applyMaskedBlur
+          // returns a new canvas the size of `base` (thumbnail), so it IS the
+          // new thumbnail — no separate createThumbnail step.
+          const thumbCanvas = applyMaskedBlur(base, blurMask, wantBlur ? mode : 'none', strength, [], null, globalBlurSettings.barColor || '#000000');
           const thumbUrl = await canvasToBlobUrl(thumbCanvas);
-          blurred.width = 0; blurred.height = 0;
           if (blurMask) { blurMask.width = 0; blurMask.height = 0; }
           if (regenCancelRef.current) {
             // Cancel tripped during canvasToBlobUrl — release what we just
@@ -220,12 +247,31 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
     removeImage(id);
   }, [removeImage]);
 
-  const handleThumbnailClick = useCallback((id) => {
+  const handleThumbnailClick = useCallback(async (id) => {
     const img = images.find(i => i.id === id);
-    if (!img || !img.strippedCanvas) return;
+    if (!img || !isReady(img)) return;
+    // Full canvases aren't retained (iOS memory). Free any other image's
+    // re-derived canvas so only the active one holds a full canvas, then
+    // re-derive this image's canvas from its file before opening the editor.
+    for (const other of images) {
+      if (other.id !== id && other.strippedCanvas) {
+        other.strippedCanvas.width = 0; other.strippedCanvas.height = 0;
+        updateImage(other.id, { strippedCanvas: null });
+      }
+    }
+    if (!img.strippedCanvas) {
+      try {
+        const { strippedCanvas } = await prepareImage(img.file, selectedTierMP);
+        updateImage(id, { strippedCanvas });
+      } catch (err) {
+        console.warn('[Batch] Re-derive for edit failed', err);
+        setWarning('Could not open this image for editing.');
+        return;
+      }
+    }
     setActiveImageId(id);
     onEditImage(id);
-  }, [images, setActiveImageId, onEditImage]);
+  }, [images, setActiveImageId, onEditImage, updateImage, selectedTierMP, setWarning]);
 
   const handleCardKeyDown = useCallback((e, id) => {
     if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -234,7 +280,7 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
     } else if (e.key === 'Enter' || e.key === ' ') {
       // Native <button> fires click on Enter+Space for free. Role="button"
       // on a <div> doesn't — we translate explicitly. handleThumbnailClick
-      // already no-ops when strippedCanvas is absent, so the aria-disabled
+      // already no-ops when the image isn't ready, so the aria-disabled
       // "no activation" contract is preserved.
       e.preventDefault();
       handleThumbnailClick(id);
@@ -674,8 +720,8 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
             key={img.id}
             className={`batch-card ${img.status === 'detecting' ? 'batch-card-loading' : ''}`}
             role="button"
-            tabIndex={img.strippedCanvas ? 0 : -1}
-            aria-disabled={img.strippedCanvas ? undefined : true}
+            tabIndex={isReady(img) ? 0 : -1}
+            aria-disabled={isReady(img) ? undefined : true}
             onClick={() => handleThumbnailClick(img.id)}
             onKeyDown={(e) => handleCardKeyDown(e, img.id)}
             aria-label={`${img.file.name} — press Delete to remove`}
@@ -700,7 +746,7 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
                 </svg>
               </div>
             )}
-            {img.strippedCanvas && (
+            {isReady(img) && (
               <div className="batch-card-edit-icon">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />

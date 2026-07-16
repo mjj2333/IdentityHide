@@ -108,17 +108,22 @@ export async function prepareImage(file, tierMP = 1) {
  * before feather so feathering softens strokes the same way it softens
  * detection shapes.
  */
-export function buildFaceMask(detections, width, height, mode, feather = 0, faceBlurCanvas = null) {
+export function buildFaceMask(detections, width, height, mode, feather = 0, faceBlurCanvas = null, scale = 1) {
   const mask = document.createElement('canvas');
   mask.width = width;
   mask.height = height;
   const ctx = mask.getContext('2d');
 
   if (mode !== 'blackbar') {
+    // `scale` lets callers draw full-resolution detection coordinates onto a
+    // smaller (e.g. thumbnail-sized) mask — used by the grid preview, which no
+    // longer keeps the full canvas. scale === 1 is the identity default.
+    if (scale !== 1) { ctx.save(); ctx.scale(scale, scale); }
     for (const det of detections) {
       if (det.kind === 'sticker') continue; // stickers aren't blur regions
       drawRegionMask(ctx, det);
     }
+    if (scale !== 1) ctx.restore();
   }
 
   // Merge freehand brush strokes (applies in every mode — for blackbar they
@@ -353,8 +358,8 @@ export async function processBatchCombined(images, globalBlurSettings, globalFea
     const img = images[i];
     let result;
 
-    // Images that failed detection have no strippedCanvas — skip.
-    if (img.status === 'error' || !img.strippedCanvas) {
+    // Images that failed detection are skipped.
+    if (img.status === 'error') {
       result = { id: img.id, outputCanvas: null, error: img.error || 'Skipped (no image data)' };
       results.push(result);
       onProgress?.(i + 1, images.length, { id: img.id, stage: 'skipped', stageFraction: 1, ...result });
@@ -362,12 +367,47 @@ export async function processBatchCombined(images, globalBlurSettings, globalFea
       continue;
     }
 
+    // The full working canvas isn't retained per image (iOS canvas-memory
+    // ceiling — see BatchGridScreen). Re-derive it from the file for this one
+    // image, then free it before the next, so peak memory stays at a single
+    // image regardless of batch size. Normalize to the dims the saved
+    // detections/masks were built at (the processing tier may differ from the
+    // grid tier the detections were computed on).
+    let stripped = img.strippedCanvas;
+    let derivedHere = false;
+    if (!stripped) {
+      try {
+        ({ strippedCanvas: stripped } = await prepareImage(img.file, tierMP));
+        derivedHere = true;
+        if (img.srcW && img.srcH && (stripped.width !== img.srcW || stripped.height !== img.srcH)) {
+          const fit = document.createElement('canvas');
+          fit.width = img.srcW;
+          fit.height = img.srcH;
+          const fctx = fit.getContext('2d');
+          fctx.imageSmoothingEnabled = true;
+          fctx.imageSmoothingQuality = 'high';
+          fctx.drawImage(stripped, 0, 0, img.srcW, img.srcH);
+          stripped.width = 0; stripped.height = 0;
+          stripped = fit;
+        }
+      } catch (err) {
+        result = { id: img.id, outputCanvas: null, error: err.message || 'Could not load image' };
+        results.push(result);
+        onProgress?.(i + 1, images.length, { id: img.id, stage: 'skipped', stageFraction: 1, ...result });
+        if (i < images.length - 1) await new Promise(r => setTimeout(r, 0));
+        continue;
+      }
+    }
+    // Shallow entry carrying the (possibly re-derived) canvas — the helpers
+    // read `.strippedCanvas` off the entry.
+    const entry = stripped === img.strippedCanvas ? img : { ...img, strippedCanvas: stripped };
+
     try {
-      const wantsInpaint = hasPaintedPixels(img.tattooMaskCanvas);
+      const wantsInpaint = hasPaintedPixels(entry.tattooMaskCanvas);
 
       let baseCanvas;
       if (wantsInpaint) {
-        baseCanvas = await runComfyUIInpaint(img, tierMP, signal, (frac, message) => {
+        baseCanvas = await runComfyUIInpaint(entry, tierMP, signal, (frac, message) => {
           onProgress?.(i, images.length, {
             id: img.id,
             stage: 'inpainting',
@@ -379,13 +419,13 @@ export async function processBatchCombined(images, globalBlurSettings, globalFea
         // Clone strippedCanvas as the working base (face blur needs a canvas
         // it can safely overwrite without affecting the stored working copy).
         baseCanvas = document.createElement('canvas');
-        baseCanvas.width = img.strippedCanvas.width;
-        baseCanvas.height = img.strippedCanvas.height;
-        baseCanvas.getContext('2d').drawImage(img.strippedCanvas, 0, 0);
+        baseCanvas.width = stripped.width;
+        baseCanvas.height = stripped.height;
+        baseCanvas.getContext('2d').drawImage(stripped, 0, 0);
         onProgress?.(i, images.length, { id: img.id, stage: 'blurring', stageFraction: 0 });
       }
 
-      const outputCanvas = applyFaceBlurToCanvas(baseCanvas, img, globalBlurSettings, globalFeather);
+      const outputCanvas = applyFaceBlurToCanvas(baseCanvas, entry, globalBlurSettings, globalFeather);
       // If applyFaceBlurToCanvas returned a new canvas (it does when there's
       // anything to blur), free the intermediate `baseCanvas` bitmap to keep
       // peak memory bounded across a 20-image batch.
@@ -399,6 +439,9 @@ export async function processBatchCombined(images, globalBlurSettings, globalFea
       if (err.name === 'AbortError') throw err;
       console.warn('[Batch] image failed:', img.file?.name, err);
       result = { id: img.id, outputCanvas: null, error: err.message || 'Processing failed' };
+    } finally {
+      // Free the re-derived working canvas before moving to the next image.
+      if (derivedHere && stripped) { stripped.width = 0; stripped.height = 0; }
     }
 
     results.push(result);

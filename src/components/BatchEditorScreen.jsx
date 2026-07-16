@@ -199,8 +199,10 @@ export default function BatchEditorScreen({ onBack }) {
   }, [imageEntry?.id]);
 
   const src = imageEntry?.strippedCanvas;
-  const imgW = src?.width || 1;
-  const imgH = src?.height || 1;
+  // Fall back to the stored source dims — the full canvas is re-derived when the
+  // editor opens, but srcW/srcH keep sizing stable if it isn't present yet.
+  const imgW = src?.width || imageEntry?.srcW || 1;
+  const imgH = src?.height || imageEntry?.srcH || 1;
 
   const {
     getTransformStyle, screenToImage,

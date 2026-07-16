@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useBatch } from '../context/BatchContext';
-import { buildBatchZip, applyBatchBlur, hasPaintedPixels } from '../utils/batchProcessor';
+import { usePipeline } from '../context/PipelineContext';
+import { buildBatchZip, applyBatchBlur, hasPaintedPixels, prepareImage } from '../utils/batchProcessor';
 import { canvasToBlob, downloadBlob } from '../utils/imageHelpers';
 import { track } from '../utils/analytics';
 import { isNativeApp } from '../utils/platform';
@@ -15,6 +16,7 @@ const FORMATS = [
 
 export default function BatchExportScreen({ onDone, onBack }) {
   const { images, resetBatch, globalBlurSettings, globalFeather, updateImage } = useBatch();
+  const { selectedTierMP } = usePipeline();
   const [format, setFormat] = useState('png');
   const [quality, setQuality] = useState(92);
   const [downloading, setDownloading] = useState(false);
@@ -30,13 +32,35 @@ export default function BatchExportScreen({ onDone, onBack }) {
   // Result is cached onto the image via updateImage so repeat exports reuse it.
   // Returns null only if the image has no source canvas to work from — callers
   // must skip (never fall back to strippedCanvas, which would export unblurred).
-  const ensureOutputCanvas = useCallback((img) => {
+  const ensureOutputCanvas = useCallback(async (img) => {
     if (img.outputCanvas) return img.outputCanvas;
-    if (!img.strippedCanvas) return null;
-    const canvas = applyBatchBlur(img, globalBlurSettings, globalFeather);
+    // The full canvas isn't retained (iOS memory). Re-derive it from the file
+    // when needed, normalized to the dims the saved edits/detections were built
+    // at, then free the temporary copy.
+    let stripped = img.strippedCanvas;
+    let derived = false;
+    if (!stripped) {
+      if (!img.file) return null;
+      try {
+        ({ strippedCanvas: stripped } = await prepareImage(img.file, selectedTierMP));
+        derived = true;
+        if (img.srcW && img.srcH && (stripped.width !== img.srcW || stripped.height !== img.srcH)) {
+          const fit = document.createElement('canvas');
+          fit.width = img.srcW; fit.height = img.srcH;
+          const fctx = fit.getContext('2d');
+          fctx.imageSmoothingEnabled = true; fctx.imageSmoothingQuality = 'high';
+          fctx.drawImage(stripped, 0, 0, img.srcW, img.srcH);
+          stripped.width = 0; stripped.height = 0;
+          stripped = fit;
+        }
+      } catch { return null; }
+    }
+    const entry = stripped === img.strippedCanvas ? img : { ...img, strippedCanvas: stripped };
+    const canvas = applyBatchBlur(entry, globalBlurSettings, globalFeather);
+    if (derived) { stripped.width = 0; stripped.height = 0; }
     updateImage(img.id, { outputCanvas: canvas, status: 'done' });
     return canvas;
-  }, [globalBlurSettings, globalFeather, updateImage]);
+  }, [globalBlurSettings, globalFeather, updateImage, selectedTierMP]);
 
   const isIOS = useMemo(() => /iPad|iPhone|iPod/.test(navigator.userAgent), []);
   const isNative = isNativeApp();
@@ -71,7 +95,7 @@ export default function BatchExportScreen({ onDone, onBack }) {
 
       if (isNative) {
         for (const img of doneImages) {
-          const canvas = ensureOutputCanvas(img);
+          const canvas = await ensureOutputCanvas(img);
           if (!canvas) continue;
           const blob = await canvasToBlob(canvas, mime, quality / 100);
           const stem = img.file?.name?.replace(/\.[^.]+$/, '') || 'image';
@@ -85,7 +109,7 @@ export default function BatchExportScreen({ onDone, onBack }) {
 
       const files = [];
       for (const img of doneImages) {
-        const canvas = ensureOutputCanvas(img);
+        const canvas = await ensureOutputCanvas(img);
         if (!canvas) continue;
         const blob = await canvasToBlob(canvas, mime, quality / 100);
         const stem = img.file?.name?.replace(/\.[^.]+$/, '') || 'image';
@@ -117,7 +141,7 @@ export default function BatchExportScreen({ onDone, onBack }) {
 
     for (let i = 0; i < doneImages.length; i++) {
       const img = doneImages[i];
-      const canvas = ensureOutputCanvas(img);
+      const canvas = await ensureOutputCanvas(img);
       if (!canvas) continue;
       try {
         const blob = await canvasToBlob(canvas, mime, quality / 100);
@@ -145,9 +169,9 @@ export default function BatchExportScreen({ onDone, onBack }) {
       // has a complete set. The map projection includes the freshly-generated
       // canvas even though the state update from ensureOutputCanvas hasn't
       // flushed to `doneImages` yet.
-      const imagesForZip = doneImages
-        .map(img => ({ ...img, outputCanvas: ensureOutputCanvas(img) }))
-        .filter(img => img.outputCanvas);
+      const imagesForZip = (await Promise.all(
+        doneImages.map(async img => ({ ...img, outputCanvas: await ensureOutputCanvas(img) }))
+      )).filter(img => img.outputCanvas);
       const zipBlob = await buildBatchZip(imagesForZip, format, quality / 100);
       const zipName = `redactid_batch_${Date.now().toString(36)}.zip`;
       if (isNative) {
@@ -169,7 +193,7 @@ export default function BatchExportScreen({ onDone, onBack }) {
     // concurrent bulk operation on the same canvases mid-download.
     setDownloading(true);
     try {
-      const canvas = ensureOutputCanvas(img);
+      const canvas = await ensureOutputCanvas(img);
       if (!canvas) return;
       const mime = FORMATS.find(f => f.key === format)?.mime || 'image/png';
       const blob = await canvasToBlob(canvas, mime, quality / 100);

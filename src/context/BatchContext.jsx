@@ -67,6 +67,7 @@ export function BatchProvider({ children }) {
         if (removed.strippedCanvas) { removed.strippedCanvas.width = 0; removed.strippedCanvas.height = 0; }
         if (removed.outputCanvas) { removed.outputCanvas.width = 0; removed.outputCanvas.height = 0; }
         if (removed.thumbnailCanvas) { removed.thumbnailCanvas.width = 0; removed.thumbnailCanvas.height = 0; }
+        if (removed.cleanThumbCanvas && removed.cleanThumbCanvas !== removed.thumbnailCanvas) { removed.cleanThumbCanvas.width = 0; removed.cleanThumbCanvas.height = 0; }
         if (removed.faceBlurCanvas) { removed.faceBlurCanvas.width = 0; removed.faceBlurCanvas.height = 0; }
         if (removed.tattooMaskCanvas) { removed.tattooMaskCanvas.width = 0; removed.tattooMaskCanvas.height = 0; }
         if (removed.thumbnailUrl) URL.revokeObjectURL(removed.thumbnailUrl);
@@ -90,6 +91,7 @@ export function BatchProvider({ children }) {
         if (img.strippedCanvas) { img.strippedCanvas.width = 0; img.strippedCanvas.height = 0; }
         if (img.outputCanvas) { img.outputCanvas.width = 0; img.outputCanvas.height = 0; }
         if (img.thumbnailCanvas) { img.thumbnailCanvas.width = 0; img.thumbnailCanvas.height = 0; }
+        if (img.cleanThumbCanvas && img.cleanThumbCanvas !== img.thumbnailCanvas) { img.cleanThumbCanvas.width = 0; img.cleanThumbCanvas.height = 0; }
         if (img.faceBlurCanvas) { img.faceBlurCanvas.width = 0; img.faceBlurCanvas.height = 0; }
         if (img.tattooMaskCanvas) { img.tattooMaskCanvas.width = 0; img.tattooMaskCanvas.height = 0; }
         if (img.thumbnailUrl) URL.revokeObjectURL(img.thumbnailUrl);
