@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Pin to the latest stable Xcode so the build uses a current SDK
       # (App Store submissions require a recent SDK).
@@ -26,7 +26,7 @@ jobs:
           xcode-version: latest-stable
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -61,7 +61,7 @@ jobs:
       # Keep the .ipa + logs for download if something goes wrong.
       - name: Upload build artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ios-build
           path: |
