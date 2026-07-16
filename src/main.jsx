@@ -2,6 +2,7 @@ import { Component } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
 import { initSentry, captureException } from './utils/sentry.js'
+import { getNativePlatform } from './utils/platform.js'
 
 // Self-hosted fonts (bundled via @fontsource-variable). Loading here once
 // so Fraunces/Inter/JetBrains Mono are available everywhere the app
@@ -15,6 +16,15 @@ import '@fontsource-variable/jetbrains-mono';
 // Initialize Sentry before the app mounts so the very earliest runtime errors
 // (e.g. module-level throws in a lazy chunk) get captured.
 initSentry();
+
+// Tag <html> with the native platform ('platform-ios' / 'platform-android') at
+// startup so CSS can scope platform-specific fixes (e.g. iOS home-indicator /
+// toolbar safe-area quirks) WITHOUT touching the web PWA or the other native
+// platform. No class is added on the web, so PWA styling is unchanged.
+const nativePlatform = getNativePlatform();
+if (nativePlatform) {
+  document.documentElement.classList.add(`platform-${nativePlatform}`);
+}
 
 // ── Error Boundary ──
 class ErrorBoundary extends Component {

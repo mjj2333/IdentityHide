@@ -1961,6 +1961,23 @@ textarea:focus-visible,
   min-height: var(--editor-toolbar-height);
 }
 
+/* iOS native ONLY (scoped via .platform-ios on <html>, set in main.jsx). PWA +
+   Android are untouched. On iOS the WKWebView (contentInset:"always" + the home
+   indicator) leaves less room than the toolbar's fixed height demands, so the
+   container's overflow:hidden clipped the bottom category tabs (Auto Blur /
+   Tattoo Removal). Cap the height instead of forcing it and drop the min-height
+   floor: the grid then keeps the tabs (the `auto` row) visible while the
+   scrollable body absorbs the shrink. overflow:visible stops the container from
+   clipping the tabs (and lets the blur-mode picker pop up). */
+.platform-ios .mask-editor-toolbar {
+  height: auto;
+  min-height: 0;
+  max-height: var(--editor-toolbar-height);
+}
+.platform-ios .screen-bottom-toolbar--mask-editor {
+  overflow: visible;
+}
+
 .mask-editor-toolbar-body {
   min-height: 0;
   overflow-y: auto;
