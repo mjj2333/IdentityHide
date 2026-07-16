@@ -70,6 +70,11 @@ export function canvasToBlobUrl(canvas) {
  * Returns { strippedCanvas, thumbnailCanvas, thumbnailUrl, exifSummary }.
  */
 export async function prepareImage(file, tierMP = 1) {
+  // TEMP: `stage` tags which step throws, so the surfaced batch error tells us
+  // exactly where iOS fails (decode / downscale / thumbnail). Remove once the
+  // batch-memory bug is nailed.
+  let stage = 'decode';
+  try {
   // Extract metadata in parallel with the canvas decode — they both read
   // the same file but different parts, so running concurrently saves a
   // small amount of latency per image.
@@ -77,6 +82,7 @@ export async function prepareImage(file, tierMP = 1) {
     fileToCanvas(file),
     extractMetadata(file).catch(() => null),
   ]);
+  stage = 'downscale';
   const { canvas: tierCanvas } = downscaleToMegapixels(fullCanvas, tierMP);
   // Free full-res canvas (batch doesn't need it — we re-export at working resolution)
   fullCanvas.width = 0;
@@ -89,6 +95,7 @@ export async function prepareImage(file, tierMP = 1) {
     tierCanvas.width = 0;
     tierCanvas.height = 0;
   }
+  stage = 'thumbnail';
   const thumbnailCanvas = createThumbnail(strippedCanvas);
   const thumbnailUrl = await canvasToBlobUrl(thumbnailCanvas);
   // `hadLocation` is only meaningful for JPEGs — extractMetadata returns
@@ -99,6 +106,9 @@ export async function prepareImage(file, tierMP = 1) {
     hadLocation: !!metadata?.gps,
   };
   return { strippedCanvas, thumbnailCanvas, thumbnailUrl, exifSummary };
+  } catch (e) {
+    throw new Error(`${stage}: ${e?.message || e}`);
+  }
 }
 
 /**
