@@ -70,33 +70,25 @@ export function canvasToBlobUrl(canvas) {
  * Returns { strippedCanvas, thumbnailCanvas, thumbnailUrl, exifSummary }.
  */
 export async function prepareImage(file, tierMP = 1) {
-  // `stage` tags which step throws so a surfaced batch error pinpoints where
-  // iOS fails (decode / thumbnail). Kept while we confirm the fix on device.
-  let stage = 'decode';
-  try {
-    // Decode straight into the capped working-resolution canvas — never
-    // allocate a full-res intermediate. That intermediate (~195 MB for a 48 MP
-    // photo) is what accumulated in iOS's canvas-memory pool across a batch and
-    // made toBlob throw InvalidStateError. extractMetadata reads file bytes in
-    // parallel (different data, no canvas cost).
-    const [strippedCanvas, metadata] = await Promise.all([
-      fileToWorkingCanvas(file, tierMP, getMaxWorkingDimension()),
-      extractMetadata(file).catch(() => null),
-    ]);
-    stage = 'thumbnail';
-    const thumbnailCanvas = createThumbnail(strippedCanvas);
-    const thumbnailUrl = await canvasToBlobUrl(thumbnailCanvas);
-    // `hadLocation` is only meaningful for JPEGs — extractMetadata returns
-    // readable:false for PNG/HEIC/WebP, so we can't confirm presence either
-    // way for those. The UI treats unreadable as "no detected location".
-    const exifSummary = {
-      readable: metadata?.readable !== false,
-      hadLocation: !!metadata?.gps,
-    };
-    return { strippedCanvas, thumbnailCanvas, thumbnailUrl, exifSummary };
-  } catch (e) {
-    throw new Error(`${stage}: ${e?.message || e}`);
-  }
+  // Decode straight into the capped working-resolution canvas — never allocate
+  // a full-res intermediate. That intermediate (~195 MB for a 48 MP photo) is
+  // what accumulated in iOS's canvas-memory pool across a batch and made toBlob
+  // throw InvalidStateError. extractMetadata reads file bytes in parallel
+  // (different data, no canvas cost).
+  const [strippedCanvas, metadata] = await Promise.all([
+    fileToWorkingCanvas(file, tierMP, getMaxWorkingDimension()),
+    extractMetadata(file).catch(() => null),
+  ]);
+  const thumbnailCanvas = createThumbnail(strippedCanvas);
+  const thumbnailUrl = await canvasToBlobUrl(thumbnailCanvas);
+  // `hadLocation` is only meaningful for JPEGs — extractMetadata returns
+  // readable:false for PNG/HEIC/WebP, so we can't confirm presence either
+  // way for those. The UI treats unreadable as "no detected location".
+  const exifSummary = {
+    readable: metadata?.readable !== false,
+    hadLocation: !!metadata?.gps,
+  };
+  return { strippedCanvas, thumbnailCanvas, thumbnailUrl, exifSummary };
 }
 
 /**

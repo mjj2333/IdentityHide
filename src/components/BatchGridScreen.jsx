@@ -97,12 +97,7 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
         updateImage(img.id, { status: 'detecting' });
         try {
           const { strippedCanvas, thumbnailCanvas, thumbnailUrl, exifSummary } = await prepareImage(img.file, selectedTierMP);
-          let detections;
-          try {
-            detections = await detect(strippedCanvas);
-          } catch (e) {
-            throw new Error(`detect: ${e?.message || e}`);
-          }
+          const detections = await detect(strippedCanvas);
           const srcW = strippedCanvas.width;
           const srcH = strippedCanvas.height;
           // Free the full working canvas right after detection. On iOS the
