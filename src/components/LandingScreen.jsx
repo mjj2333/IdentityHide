@@ -286,8 +286,8 @@ export default function LandingScreen({ onEnter }) {
               Share photos without revealing <span className="landing-accent">who you are</span>.
             </h1>
             <p className="landing-hero-sub">
-              Blur faces, place censor stickers, and strip hidden location data in seconds.
-              Core redaction runs entirely on your device, so your photos stay yours.
+              Blur faces, remove tattoos, place censor stickers, and strip hidden location data in seconds.
+              Face blur, stickers, and metadata stripping run entirely on your device, so your photos stay yours.
             </p>
             <div className="landing-cta-row">
               <button className="landing-btn landing-btn-primary" onClick={() => enter('hero')}>
