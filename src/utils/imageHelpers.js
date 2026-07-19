@@ -125,6 +125,60 @@ export function downloadBlob(blob, filename) {
 }
 
 /**
+ * High-quality canvas resize using progressive halving. A single drawImage from
+ * a large source straight to a much smaller target uses the browser's bilinear
+ * filter, which only samples a ~2x2 neighborhood and therefore aliases (crunchy,
+ * "pixelated" edges) on big reductions — most of the source pixels are skipped.
+ * Halving in <=2x steps lets each pass area-average properly, so the cumulative
+ * result approaches bicubic/Lanczos (Photoshop-grade) quality. Upscales and
+ * <=2x reductions fall through to a single high-quality draw. Intermediate
+ * canvases are freed as we go, so the transient footprint stays near one extra
+ * step rather than the whole chain.
+ *
+ * Returns a NEW canvas sized exactly targetW x targetH. The source is never
+ * modified or freed — the caller owns it.
+ */
+export function resampleHighQuality(source, targetW, targetH) {
+  const dstW = Math.max(1, Math.round(targetW));
+  const dstH = Math.max(1, Math.round(targetH));
+
+  const drawStep = (src, w, h) => {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, w, h);
+    return c;
+  };
+
+  // Upscaling (or no reduction) gains nothing from stepping — one draw is best.
+  if (dstW >= source.width && dstH >= source.height) {
+    return drawStep(source, dstW, dstH);
+  }
+
+  let cur = source;
+  let curW = source.width;
+  let curH = source.height;
+  // Halve while the source is still more than 2x larger than the target, so the
+  // final draw is always a clean <=2x reduction the bilinear filter handles well.
+  while (curW > dstW * 2 && curH > dstH * 2) {
+    const nextW = Math.max(dstW, Math.round(curW / 2));
+    const nextH = Math.max(dstH, Math.round(curH / 2));
+    const next = drawStep(cur, nextW, nextH);
+    if (cur !== source) { cur.width = 0; cur.height = 0; } // release intermediate
+    cur = next;
+    curW = nextW;
+    curH = nextH;
+  }
+
+  const out = drawStep(cur, dstW, dstH);
+  if (cur !== source) { cur.width = 0; cur.height = 0; }
+  return out;
+}
+
+/**
  * Downscale a canvas to a target total megapixel count.
  * Dimensions are rounded to the nearest multiple of 16 for Flux VAE
  * stride alignment. Returns { canvas }; the object shape is preserved for
@@ -153,15 +207,9 @@ export function downscaleToMegapixels(sourceCanvas, targetMP = 1) {
   const scale = Math.sqrt(targetMP / currentMP);
   const newW = Math.max(ALIGN, Math.round((width * scale) / ALIGN) * ALIGN);
   const newH = Math.max(ALIGN, Math.round((height * scale) / ALIGN) * ALIGN);
-  const c = document.createElement('canvas');
-  c.width = newW;
-  c.height = newH;
-  const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(sourceCanvas, 0, 0, newW, newH);
+  const c = resampleHighQuality(sourceCanvas, newW, newH);
   const actualMP = (newW * newH) / 1_000_000;
-  console.log(`[downscale] ${width}x${height} (${currentMP.toFixed(1)}MP) → ${newW}x${newH} (${actualMP.toFixed(2)}MP)`);
+  console.log(`[downscale] ${width}x${height} (${currentMP.toFixed(1)}MP) → ${newW}x${newH} (${actualMP.toFixed(2)}MP, stepped)`);
   return { canvas: c };
 }
 
@@ -185,14 +233,8 @@ export function capToMaxDimension(sourceCanvas, maxDim) {
   const scale = maxDim / longest;
   const newW = Math.max(ALIGN, Math.round((width * scale) / ALIGN) * ALIGN);
   const newH = Math.max(ALIGN, Math.round((height * scale) / ALIGN) * ALIGN);
-  const c = document.createElement('canvas');
-  c.width = newW;
-  c.height = newH;
-  const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(sourceCanvas, 0, 0, newW, newH);
-  console.log(`[cap] ${width}x${height} → ${newW}x${newH} (max ${maxDim}px)`);
+  const c = resampleHighQuality(sourceCanvas, newW, newH);
+  console.log(`[cap] ${width}x${height} → ${newW}x${newH} (max ${maxDim}px, stepped)`);
   return { canvas: c, scaled: true };
 }
 
