@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { openCheckout } from '../utils/stripe';
 import { track } from '../utils/analytics';
+import { isNativeApp } from '../utils/platform';
 
 /**
  * Subscription plan picker -> Stripe hosted Checkout.
@@ -68,6 +69,11 @@ export default function SubscribeModal({ onClose, source = 'unknown' }) {
     if (busy) return;
     onClose?.();
   };
+
+  // Apple 3.1.1: the Stripe (non-store) purchase path must not exist on the
+  // native builds. Every caller already gates on !isNativeApp(); this is
+  // defense in depth so no future opener can surface it on the store build.
+  if (isNativeApp()) return null;
 
   return (
     <div className="confirm-backdrop" onClick={handleDismiss}>

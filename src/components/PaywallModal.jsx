@@ -40,6 +40,9 @@ export default function PaywallModal({ onClose, onEarnedCredit, onRedeemClick, o
   // Subscribe is web-only: the Play/App Store builds must not surface a
   // non-store purchase path, so the button simply never renders there.
   const showSubscribe = !!onSubscribeClick && !isNativeApp();
+  // Promo-code redemption is likewise a non-IAP unlock (Apple 3.1.1) — hide it
+  // on native. Rewarded ads and "Later" remain the native paths.
+  const showRedeem = !!onRedeemClick && !isNativeApp();
   const handleWatchAd = async () => {
     if (busy || !canWatchAd) return;
     setBusy(true);
@@ -82,7 +85,7 @@ export default function PaywallModal({ onClose, onEarnedCredit, onRedeemClick, o
         <p className="confirm-message">
           {showSubscribe
             ? "You've used all your free tattoo removals for this week. Go Premium for unlimited removals, or watch a short ad for one more credit."
-            : "You've used all your free tattoo removals for this week. Watch a short ad for one more credit, or redeem a promo code to unlock everything."}
+            : "You've used all your free tattoo removals for this week. Watch a short ad for one more credit."}
         </p>
 
         <div className="paywall-actions">
@@ -105,7 +108,7 @@ export default function PaywallModal({ onClose, onEarnedCredit, onRedeemClick, o
           >
             {canWatchAd ? 'Watch ad for +1 credit' : `Weekly ad cap reached (${MAX_EARNED_PER_WEEK})`}
           </button>
-          {onRedeemClick && (
+          {showRedeem && (
             <button
               className="btn btn-ghost btn-lg"
               onClick={onRedeemClick}

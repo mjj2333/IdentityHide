@@ -148,7 +148,9 @@ export default function DropZone() {
     if (imageFiles.length > cap) {
       setWarning(premium
         ? 'Maximum 20 images per batch. First 20 selected.'
-        : `Free batches are capped at ${cap} images. First ${cap} selected. Go Premium for up to 20.`);
+        : isNativeApp()
+          ? `Free batches are capped at ${cap} images. First ${cap} selected.`
+          : `Free batches are capped at ${cap} images. First ${cap} selected. Go Premium for up to 20.`);
     }
     track('batch_upload', { count: capped.length });
     seedFiles(capped, cap);

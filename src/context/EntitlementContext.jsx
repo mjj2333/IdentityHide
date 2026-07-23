@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useMemo } 
 import { fetchEntitlement, confirmFromSession } from '../utils/stripe';
 import { getCreditState } from '../utils/credits';
 import { track } from '../utils/analytics';
+import { isNativeApp } from '../utils/platform';
 
 // Two credential types stored separately:
 //   EMAIL_KEY: set by Stripe Checkout success, SignInModal, or admin manual
@@ -221,11 +222,19 @@ export function EntitlementProvider({ children }) {
     signOut();
   }, [email, betaCode, signOut]);
 
+  // Apple 3.1.1: promo ("beta") codes are a non-IAP unlock and are not
+  // permitted on the native builds. There's no StoreKit IAP yet and Stripe is
+  // web-only, so on iOS/Android premium is intentionally unattainable in-app.
+  // Suppress any beta-sourced entitlement here — including a code persisted
+  // from a prior build or install — so the store build exposes no non-IAP
+  // unlock and keeps showing ads. Web/PWA is unaffected (isNativeApp() false).
+  const effectivePremium = premium && !(isNativeApp() && source === 'beta');
+
   const value = useMemo(() => ({
-    email, betaCode, premium, expiresAt, source, loading,
+    email, betaCode, premium: effectivePremium, expiresAt, source, loading,
     creditState, syncCreditState,
     signIn, signInWithCode, signOut, deleteAccount, refreshEntitlement, consumeStripeSuccess,
-  }), [email, betaCode, premium, expiresAt, source, loading, creditState, syncCreditState, signIn, signInWithCode, signOut, deleteAccount, refreshEntitlement, consumeStripeSuccess]);
+  }), [email, betaCode, effectivePremium, expiresAt, source, loading, creditState, syncCreditState, signIn, signInWithCode, signOut, deleteAccount, refreshEntitlement, consumeStripeSuccess]);
 
   return (
     <EntitlementContext.Provider value={value}>

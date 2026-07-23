@@ -3,6 +3,7 @@ import { useFocusTrap } from '../hooks/useFocusTrap';
 import { useEntitlement } from '../context/EntitlementContext';
 import { redeemBetaCode } from '../utils/betaCodes';
 import { track } from '../utils/analytics';
+import { isNativeApp } from '../utils/platform';
 
 /**
  * Beta code redemption modal — visually unified with BetaWelcomeModal so
@@ -57,6 +58,11 @@ export default function RedeemCodeModal({ onClose, onSuccess }) {
       setBusy(false);
     }
   };
+
+  // Apple 3.1.1: promo-code redemption is a non-IAP unlock and must not exist
+  // on the native builds. Defense-in-depth — even if a caller opens this on
+  // native, render nothing. Web/PWA is unaffected.
+  if (isNativeApp()) return null;
 
   return (
     <div className="confirm-backdrop" onClick={() => !busy && onClose?.()}>

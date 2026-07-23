@@ -78,7 +78,7 @@ export default function AccountScreen({ onBack }) {
             <p>
               {canPurchase
                 ? 'Go Premium for unlimited tattoo removal, full batch processing, and an ad-free experience.'
-                : 'Redeem a promo code for access to unlimited tattoo removal, batch processing, and an ad-free experience.'}
+                : 'Redact.ID is free to use — unlimited face blur, redaction stickers, and metadata stripping. Earn AI tattoo-removal credits any time by watching a short ad.'}
             </p>
             <div className="account-actions">
               {canPurchase && (
@@ -90,13 +90,17 @@ export default function AccountScreen({ onBack }) {
                   Go Premium
                 </button>
               )}
-              <button
-                className={`btn ${canPurchase ? 'btn-secondary' : 'btn-primary'} btn-lg`}
-                onClick={() => setShowRedeem(true)}
-                disabled={busy}
-              >
-                Redeem a promo code
-              </button>
+              {/* Promo-code redemption is a non-IAP unlock; hidden on native
+                  (canPurchase === false) for Apple 3.1.1. Web/PWA keeps it. */}
+              {canPurchase && (
+                <button
+                  className="btn btn-secondary btn-lg"
+                  onClick={() => setShowRedeem(true)}
+                  disabled={busy}
+                >
+                  Redeem a promo code
+                </button>
+              )}
               {/* Sign-in restores a web (Stripe) subscription by email. Hidden
                   in the native shells: Apple 3.1.3(b) only permits accessing a
                   subscription bought elsewhere if it's also an in-app purchase,
@@ -180,13 +184,17 @@ export default function AccountScreen({ onBack }) {
                       Go Premium
                     </button>
                   )}
-                  <button
-                    className={`btn ${canPurchase ? 'btn-secondary' : 'btn-primary'} btn-lg`}
-                    onClick={() => setShowRedeem(true)}
-                    disabled={busy}
-                  >
-                    Redeem a promo code
-                  </button>
+                  {/* Promo-code redemption hidden on native (Apple 3.1.1);
+                      web/PWA keeps it. */}
+                  {canPurchase && (
+                    <button
+                      className="btn btn-secondary btn-lg"
+                      onClick={() => setShowRedeem(true)}
+                      disabled={busy}
+                    >
+                      Redeem a promo code
+                    </button>
+                  )}
                   <button
                     className="btn btn-secondary"
                     onClick={() => refreshEntitlement(undefined, { forceFresh: true })}

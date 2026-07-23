@@ -1,6 +1,7 @@
 import { useState, useId } from 'react';
 import ScreenShell from './ScreenShell';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
+import { isNativeApp } from '../utils/platform';
 
 // Each entry pairs a renderable answer (`a`, can be string or JSX) with a
 // plain-HTML version (`aHtml`) used by FAQPage structured data. Google
@@ -152,6 +153,21 @@ export default function FaqScreen({ onBack }) {
     // Swap to /og/faq.png once a per-route image is designed.
     ogImage: 'https://redactid.app/og-image.png',
   });
+  // On the native builds, drop the "premium plan" Q&A and the premium mention
+  // in the tattoo-removal answer — Apple 3.1.1 objects to promoting a paid tier
+  // that has no in-app (IAP) purchase path. Web/PWA shows the full FAQ.
+  const faqData = isNativeApp()
+    ? FAQ_DATA.map((section) => ({
+        ...section,
+        questions: section.questions
+          .filter((item) => !item.q.startsWith('What do I get with the premium plan'))
+          .map((item) =>
+            item.q === 'Is AI tattoo removal free?'
+              ? { ...item, a: 'Face blur, redaction stickers, and metadata stripping are always free and unlimited. AI tattoo removal is a premium feature, but free users get 3 removals per week, plus more by watching a short ad.' }
+              : item
+          ),
+      }))
+    : FAQ_DATA;
   return (
     <ScreenShell backAction={onBack} backLabel="Back">
       {/* FAQPage structured data — only emitted on this route, where the
@@ -159,14 +175,18 @@ export default function FaqScreen({ onBack }) {
           surface FAQ entries directly in search results as expandable
           "People Also Ask" accordions. The schema lives next to the
           rendered FAQ so the two stay in sync. */}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_SCHEMA) }}
-      />
+      {/* SEO structured data is only meaningful to web crawlers; skip it on
+          native, where it would also embed the (web-only) premium-plan Q&A. */}
+      {!isNativeApp() && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_SCHEMA) }}
+        />
+      )}
       <div className="faq-container">
         <h1 className="faq-title">FAQ</h1>
 
-        {FAQ_DATA.map((section) => (
+        {faqData.map((section) => (
           <section key={section.category} className="faq-section">
             <h2 className="faq-category">{section.category}</h2>
             {section.questions.map((item) => (
