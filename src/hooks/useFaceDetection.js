@@ -1,4 +1,9 @@
 import { useCallback } from 'react';
+import { diagLog, diagSpan } from '../utils/perfDiagnostics';
+import { selectBackend } from '../utils/tfBackend';
+import wasmUrl from '@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm.wasm?url';
+import wasmSimdUrl from '@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-simd.wasm?url';
+import wasmThreadedSimdUrl from '@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-threaded-simd.wasm?url';
 
 // BlazeFace resizes its input to 128×128 internally, so detail above ~2048px
 // is wasted. Feeding a full 12–24MP canvas to TF.js spikes memory and can
@@ -17,6 +22,35 @@ const ELLIPSE_CONTOUR_POINTS = 36;
 // faces that disappear at BlazeFace's 128×128 internal input — but when the
 // user's subject is clearly in frame, tiles are 4× wasted inference.
 const DETECT_FAST_PATH_PROBABILITY = 0.97;
+
+// TF.js backends, in order of preference.
+//
+// WASM first: the WebGL backend compiles every BlazeFace shader on the main
+// thread the first time it runs — measured at 7–9 s of frozen UI per page
+// load (independent of image size, since BlazeFace works at 128×128), and it
+// has to be redone whenever the browser drops the WebGL context, which mobile
+// browsers do to backgrounded pages. WASM has no shaders to compile (first
+// detection ~0.2 s on the same machine) and no GPU context to lose. WebGL and
+// CPU remain as fallbacks for browsers where WASM can't start.
+//
+// The .wasm binaries are emitted as hashed /assets/ files via `?url`, so they
+// get the same immutable caching + service-worker handling as the JS chunks.
+// Only the variant the browser supports is ever fetched.
+const BACKENDS = [
+  {
+    name: 'wasm',
+    load: async () => {
+      const { setWasmPaths } = await import('@tensorflow/tfjs-backend-wasm');
+      setWasmPaths({
+        'tfjs-backend-wasm.wasm': wasmUrl,
+        'tfjs-backend-wasm-simd.wasm': wasmSimdUrl,
+        'tfjs-backend-wasm-threaded-simd.wasm': wasmThreadedSimdUrl,
+      });
+    },
+  },
+  { name: 'webgl', load: () => import('@tensorflow/tfjs-backend-webgl') },
+  { name: 'cpu', load: () => import('@tensorflow/tfjs-backend-cpu') },
+];
 
 // TF.js and BlazeFace are lazy-loaded on first detect() call to keep the
 // initial bundle small (~1.3 MB of TF.js stays out of the main chunk).
@@ -51,36 +85,42 @@ async function loadModel() {
   if (model) return model;
   if (modelLoading) return modelLoading;
   modelLoading = (async () => {
+    const endLoad = diagSpan('model-load');
+    // Phase marks for the diagnostics entry: which part of a slow load was
+    // slow — our code chunks, backend start-up, or the weights download.
+    const phase = [performance.now()];
     // Dynamic imports — Vite code-splits these into separate chunks. Fetch
-    // all four in PARALLEL via Promise.all instead of sequentially, since
-    // none of them depend on the others at import time. The backends
-    // self-register into the tf namespace once loaded; blazeface is
-    // independent of tf-core at module-load time (only uses it at runtime
-    // inside .load()). Cuts cold-start face-detect time by 1-3s on slow
-    // networks (each chunk used to wait for the previous to finish).
-    const [tfModule, , , blazefaceModule] = await Promise.all([
+    // them in PARALLEL via Promise.all instead of sequentially, since none of
+    // them depend on the others at import time. The backend self-registers
+    // into the tf namespace once loaded; blazeface is independent of tf-core
+    // at module-load time (only uses it at runtime inside .load()). Cuts
+    // cold-start face-detect time by 1-3s on slow networks. Only the
+    // PREFERRED backend is fetched up front — selectBackend() pulls the
+    // fallbacks' chunks on demand, so most sessions never download WebGL.
+    const [tfModule, blazefaceModule] = await Promise.all([
       import('@tensorflow/tfjs-core'),
-      import('@tensorflow/tfjs-backend-webgl'),
-      import('@tensorflow/tfjs-backend-cpu'),
       import('@tensorflow-models/blazeface'),
+      BACKENDS[0].load().catch(() => {}), // selectBackend retries + reports
     ]);
     tf = tfModule;
     const blazeface = blazefaceModule;
+    phase.push(performance.now());
 
-    try {
-      await tf.setBackend('webgl');
-      await tf.ready();
-    } catch {
-      console.warn('[FaceDetect] WebGL unavailable, falling back to CPU');
-      await tf.setBackend('cpu');
-      await tf.ready();
-    }
-    console.log('[FaceDetect] TF.js backend:', tf.getBackend());
+    const backend = await selectBackend(tf, BACKENDS);
+    console.log('[FaceDetect] TF.js backend:', backend);
+    phase.push(performance.now());
     model = await blazeface.load({
       maxFaces: BLAZEFACE_MAX_FACES,
       scoreThreshold: BLAZEFACE_SCORE_THRESHOLD,
     });
     console.log(`[FaceDetect] BlazeFace loaded (threshold=${BLAZEFACE_SCORE_THRESHOLD}, maxFaces=${BLAZEFACE_MAX_FACES})`);
+    phase.push(performance.now());
+    endLoad({
+      backend: tf.getBackend(),
+      importMs: Math.round(phase[1] - phase[0]),
+      backendMs: Math.round(phase[2] - phase[1]),
+      weightsMs: Math.round(phase[3] - phase[2]),
+    });
     modelLoading = null;
     return model;
   })();
@@ -214,11 +254,16 @@ export function useFaceDetection() {
     }
     const inv = ds < 1 ? 1 / ds : 1;
 
+    // Diagnostics (?diag=1): the first detection after a page load — or after
+    // the browser drops the WebGL context — recompiles every shader on the
+    // main thread, so this span is where a multi-second freeze shows up.
+    const endDetect = diagSpan('detect', { w: detectCanvas.width, h: detectCanvas.height });
     try {
       let predictions;
       try {
         predictions = await detectMultiScale(face, detectCanvas);
       } catch (err) {
+        diagLog('detect-retry', { error: String(err?.message || err).slice(0, 80) });
         // WebGL context loss — dispose stale model, reload, retry once.
         // Capped at MAX_MODEL_RELOADS across the page lifetime.
         if (modelReloadCount >= MAX_MODEL_RELOADS) {
@@ -232,6 +277,7 @@ export function useFaceDetection() {
         predictions = await detectMultiScale(face, detectCanvas);
       }
 
+      endDetect({ faces: predictions.length });
       return predictions.map((pred) => {
         // Scale boxes/landmarks from detect-canvas space back to source space.
         const topLeft = [pred.topLeft[0] * inv, pred.topLeft[1] * inv];
