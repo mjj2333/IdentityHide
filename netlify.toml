@@ -78,13 +78,21 @@
     # - media-src https:: Clickadilla video URLs come from whatever CDN the
     #   winning advertiser uses. Same story as impression pixels.
     # - connect-src lists: ComfyUI tunnel (identity-hide.com, ws for progress),
-    #   AppLixir SDK + ad endpoints, Sentry ingest, tfhub.dev + Google Cloud
-    #   Storage + kaggle.com (BlazeFace model weights — tfhub now redirects
-    #   model downloads to Kaggle's CDN).
+    #   AppLixir SDK + ad endpoints, Sentry ingest. (The BlazeFace model is
+    #   self-hosted under /models/, so tfhub.dev / Google Cloud Storage /
+    #   kaggle.com are deliberately NOT allowed — nothing should fetch them.)
     # - Adsterra popunder script loads from profitablecpmratenetwork.com;
     #   opened popunders are cross-origin window.open (not iframed), so no
     #   frame-src entry is needed — script-src + connect-src cover it.
-    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.applixir.com https://*.applixir.com https://*.profitablecpmratenetwork.com https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://identity-hide.com wss://identity-hide.com https://cdn.applixir.com https://*.applixir.com https://*.profitablecpmratenetwork.com https://o4511186341658625.ingest.us.sentry.io https://tfhub.dev https://storage.googleapis.com https://www.kaggle.com https://kaggle.com https://api.stripe.com https://checkout.stripe.com https://m.stripe.network; font-src 'self' data:; frame-src https://*.applixir.com https://checkout.stripe.com https://js.stripe.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'"
+    Content-Security-Policy-Report-Only = "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.applixir.com https://*.applixir.com https://*.profitablecpmratenetwork.com https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://identity-hide.com wss://identity-hide.com https://cdn.applixir.com https://*.applixir.com https://*.profitablecpmratenetwork.com https://o4511186341658625.ingest.us.sentry.io https://api.stripe.com https://checkout.stripe.com https://m.stripe.network; font-src 'self' data:; frame-src https://*.applixir.com https://checkout.stripe.com https://js.stripe.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'"
+
+# Self-hosted face-detection model (manifest + weights). Versioned by FOLDER
+# name (blazeface-v1) — never edit the files in place; a new model goes in a
+# new folder, so these can be cached forever.
+[[headers]]
+  for = "/models/blazeface-v1/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
 
 # Cache ONNX models for 1 year — they're versioned by filename
 [[headers]]

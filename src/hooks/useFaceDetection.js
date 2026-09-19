@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { diagLog, diagSpan } from '../utils/perfDiagnostics';
 import { selectBackend } from '../utils/tfBackend';
+import { createRetryableLoader } from '../utils/retryableLoader';
 import wasmUrl from '@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm.wasm?url';
 import wasmSimdUrl from '@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-simd.wasm?url';
 import wasmThreadedSimdUrl from '@tensorflow/tfjs-backend-wasm/dist/tfjs-backend-wasm-threaded-simd.wasm?url';
@@ -52,11 +53,18 @@ const BACKENDS = [
   { name: 'cpu', load: () => import('@tensorflow/tfjs-backend-cpu') },
 ];
 
+// The BlazeFace model (manifest + one weights file, ~466 KB) is served from our
+// own origin — see public/models/blazeface-v1/README.md. The package's default
+// is a runtime download from tfhub.dev → kaggle.com → a signed Google Cloud
+// Storage URL, which meant a third-party request on every cold load, no
+// offline face detection, and outright failures when that redirect chain
+// answered without CORS headers.
+const BLAZEFACE_MODEL_URL = `${import.meta.env.BASE_URL}models/blazeface-v1/model.json`;
+
 // TF.js and BlazeFace are lazy-loaded on first detect() call to keep the
 // initial bundle small (~1.3 MB of TF.js stays out of the main chunk).
 let tf = null;
 let model = null;
-let modelLoading = null;
 
 // Upper bound on WebGL-context-loss reload-and-retry cycles across the lifetime
 // of the page. Past this we stop trying to reload and surface the error so a
@@ -69,7 +77,7 @@ function disposeModel() {
     try { model.dispose?.(); } catch {}
     model = null;
   }
-  modelLoading = null;
+  modelLoader.reset();
 }
 
 // Vite HMR — dispose the cached BlazeFace model before the module is
@@ -81,51 +89,57 @@ if (import.meta.hot) {
   });
 }
 
-async function loadModel() {
-  if (model) return model;
-  if (modelLoading) return modelLoading;
-  modelLoading = (async () => {
-    const endLoad = diagSpan('model-load');
-    // Phase marks for the diagnostics entry: which part of a slow load was
-    // slow — our code chunks, backend start-up, or the weights download.
-    const phase = [performance.now()];
-    // Dynamic imports — Vite code-splits these into separate chunks. Fetch
-    // them in PARALLEL via Promise.all instead of sequentially, since none of
-    // them depend on the others at import time. The backend self-registers
-    // into the tf namespace once loaded; blazeface is independent of tf-core
-    // at module-load time (only uses it at runtime inside .load()). Cuts
-    // cold-start face-detect time by 1-3s on slow networks. Only the
-    // PREFERRED backend is fetched up front — selectBackend() pulls the
-    // fallbacks' chunks on demand, so most sessions never download WebGL.
-    const [tfModule, blazefaceModule] = await Promise.all([
-      import('@tensorflow/tfjs-core'),
-      import('@tensorflow-models/blazeface'),
-      BACKENDS[0].load().catch(() => {}), // selectBackend retries + reports
-    ]);
-    tf = tfModule;
-    const blazeface = blazefaceModule;
-    phase.push(performance.now());
+// A failed load (e.g. a dropped connection mid-download) is NOT cached — the
+// next detection tries again, instead of face detection staying broken
+// until the page is reloaded.
+const modelLoader = createRetryableLoader(() => loadBlazeFace().catch((err) => {
+  // Diagnostics (?diag=1): a failed load would otherwise leave no trace.
+  diagLog('model-load-failed', { error: String(err?.message || err).slice(0, 80) });
+  throw err;
+}));
 
-    const backend = await selectBackend(tf, BACKENDS);
-    console.log('[FaceDetect] TF.js backend:', backend);
-    phase.push(performance.now());
-    model = await blazeface.load({
-      maxFaces: BLAZEFACE_MAX_FACES,
-      scoreThreshold: BLAZEFACE_SCORE_THRESHOLD,
-    });
-    console.log(`[FaceDetect] BlazeFace loaded (threshold=${BLAZEFACE_SCORE_THRESHOLD}, maxFaces=${BLAZEFACE_MAX_FACES})`);
-    phase.push(performance.now());
-    endLoad({
-      backend: tf.getBackend(),
-      importMs: Math.round(phase[1] - phase[0]),
-      backendMs: Math.round(phase[2] - phase[1]),
-      weightsMs: Math.round(phase[3] - phase[2]),
-    });
-    modelLoading = null;
-    return model;
-  })();
-  return modelLoading;
+async function loadBlazeFace() {
+  const endLoad = diagSpan('model-load');
+  // Phase marks for the diagnostics entry: which part of a slow load was
+  // slow — our code chunks, backend start-up, or the weights download.
+  const phase = [performance.now()];
+  // Dynamic imports — Vite code-splits these into separate chunks. Fetch
+  // them in PARALLEL via Promise.all instead of sequentially, since none of
+  // them depend on the others at import time. The backend self-registers
+  // into the tf namespace once loaded; blazeface is independent of tf-core
+  // at module-load time (only uses it at runtime inside .load()). Cuts
+  // cold-start face-detect time by 1-3s on slow networks. Only the
+  // PREFERRED backend is fetched up front — selectBackend() pulls the
+  // fallbacks' chunks on demand, so most sessions never download WebGL.
+  const [tfModule, blazefaceModule] = await Promise.all([
+    import('@tensorflow/tfjs-core'),
+    import('@tensorflow-models/blazeface'),
+    BACKENDS[0].load().catch(() => {}), // selectBackend retries + reports
+  ]);
+  tf = tfModule;
+  const blazeface = blazefaceModule;
+  phase.push(performance.now());
+
+  const backend = await selectBackend(tf, BACKENDS);
+  console.log('[FaceDetect] TF.js backend:', backend);
+  phase.push(performance.now());
+  model = await blazeface.load({
+    maxFaces: BLAZEFACE_MAX_FACES,
+    scoreThreshold: BLAZEFACE_SCORE_THRESHOLD,
+    modelUrl: BLAZEFACE_MODEL_URL,
+  });
+  console.log(`[FaceDetect] BlazeFace loaded (threshold=${BLAZEFACE_SCORE_THRESHOLD}, maxFaces=${BLAZEFACE_MAX_FACES})`);
+  phase.push(performance.now());
+  endLoad({
+    backend: tf.getBackend(),
+    importMs: Math.round(phase[1] - phase[0]),
+    backendMs: Math.round(phase[2] - phase[1]),
+    weightsMs: Math.round(phase[3] - phase[2]),
+  });
+  return model;
 }
+
+const loadModel = () => modelLoader.load();
 
 // --- NMS utilities ---
 

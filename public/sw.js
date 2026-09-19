@@ -97,8 +97,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Model/WASM files: cache-first (versioned, long-lived)
-  if (url.pathname.match(/\.(onnx|wasm)$/)) {
+  // Model/WASM files: cache-first (versioned, long-lived). /models/ holds the
+  // self-hosted face-detection model (versioned by folder name), cached here
+  // so face detection keeps working offline. Same-origin only — other sites
+  // have /models/ paths too.
+  const isOwnModel = url.origin === self.location.origin && url.pathname.startsWith('/models/');
+  if (isOwnModel || url.pathname.match(/\.(onnx|wasm)$/)) {
     event.respondWith(
       caches.match(request).then(cached => {
         if (cached) return cached;
