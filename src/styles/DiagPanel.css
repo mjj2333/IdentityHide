@@ -1,0 +1,92 @@
+/* Opt-in diagnostics overlay (?diag=1). Sits above everything, including
+   modals, so a freeze can be inspected no matter what screen it happened on. */
+.diag-pill,
+.diag-panel {
+  position: fixed;
+  left: calc(8px + env(safe-area-inset-left, 0px));
+  z-index: 10000;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.35;
+  color: #e9e6df;
+  background: rgba(13, 12, 10, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.diag-pill {
+  top: calc(52px + env(safe-area-inset-top, 0px));
+  padding: 3px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.diag-pill-stalls {
+  color: #ff8a8a;
+}
+
+.diag-panel {
+  top: calc(52px + env(safe-area-inset-top, 0px));
+  right: calc(8px + env(safe-area-inset-right, 0px));
+  max-width: 560px;
+  max-height: 45vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.diag-panel-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.diag-panel-title {
+  flex: 1;
+  font-weight: 600;
+}
+
+.diag-panel-bar button {
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.diag-panel-list {
+  margin: 0;
+  padding: 4px 8px 8px;
+  list-style: none;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.diag-panel-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.diag-panel-list li.is-stall {
+  color: #ff8a8a;
+}
+
+.diag-time {
+  opacity: 0.55;
+}
+
+.diag-type {
+  font-weight: 600;
+}
+
+.diag-details {
+  opacity: 0.8;
+  word-break: break-word;
+}

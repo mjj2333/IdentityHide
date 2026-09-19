@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { saveSession, clearSession } from '../utils/sessionStore';
+import { diagLog, diagSpan } from '../utils/perfDiagnostics';
 import { getTierMP, getSavedTierKey } from '../utils/resolutionTiers';
 import { migrateBlurSettings } from '../utils/blurEngine';
 
@@ -88,10 +89,21 @@ export function PipelineProvider({ children }) {
   // change and a persistent QuotaExceededError would otherwise spam the toast.
   // Reset on the next successful save so transient errors still get surfaced.
   const saveFailedRef = useRef(false);
+  // Diagnostics only (?diag=1): true while a debounced save is waiting to
+  // fire, so rapid state changes (e.g. dragging a region) log one
+  // 'save-scheduled' rather than one per pointermove.
+  const saveQueuedRef = useRef(false);
   useEffect(() => {
-    if (screen === 'drop' || status !== 'ready') return;
+    if (screen === 'drop' || status !== 'ready') { saveQueuedRef.current = false; return; }
     clearTimeout(saveTimerRef.current);
+    if (!saveQueuedRef.current) {
+      saveQueuedRef.current = true;
+      diagLog('save-scheduled', { screen });
+    }
     saveTimerRef.current = setTimeout(async () => {
+      saveQueuedRef.current = false;
+      diagLog('save-start');
+      const endSave = diagSpan('save-end');
       try {
         await saveSession({
           originalFile,
@@ -109,7 +121,9 @@ export function PipelineProvider({ children }) {
           fullResCanvas: fullResCanvasRef.current,
         });
         saveFailedRef.current = false;
+        endSave();
       } catch (e) {
+        diagLog('save-error', { error: e?.name || String(e) });
         console.warn('[sessionStore] save failed:', e?.message || e);
         if (!saveFailedRef.current) {
           saveFailedRef.current = true;

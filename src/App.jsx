@@ -13,6 +13,7 @@ import { usePwaUpdate } from './hooks/usePwaUpdate';
 import { captureException } from './utils/sentry';
 import { track } from './utils/analytics';
 import { isNativeApp } from './utils/platform';
+import { isDiagEnabled } from './utils/perfDiagnostics';
 import DeepLinkHandler from './components/DeepLinkHandler';
 import BackButtonHandler from './components/BackButtonHandler';
 import StatusBarConfig from './components/StatusBarConfig';
@@ -31,6 +32,8 @@ const PrivacyScreen = lazy(() => import('./components/PrivacyScreen'));
 const FaqScreen = lazy(() => import('./components/FaqScreen'));
 const AccountScreen = lazy(() => import('./components/AccountScreen'));
 const LandingScreen = lazy(() => import('./components/LandingScreen'));
+// Opt-in diagnostics overlay (?diag=1) — lazy so it never enters the main chunk.
+const DiagPanel = lazy(() => import('./components/DiagPanel'));
 
 // True when running as an installed/standalone PWA (or iOS standalone). Such
 // launches should go straight to the tool, never the marketing landing.
@@ -373,6 +376,7 @@ export default function App() {
           <ScreenRouter />
           {!isNativeApp() && <InstallPrompt />}
           {updatePrompt}
+          {isDiagEnabled() && <Suspense fallback={null}><DiagPanel /></Suspense>}
         </BatchProvider>
       </PipelineProvider>
     </EntitlementProvider>

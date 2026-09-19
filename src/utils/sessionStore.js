@@ -3,6 +3,8 @@
  * Stores: original file, tattoo mask, key canvases, screen position, settings.
  */
 
+import { diagSpan } from './perfDiagnostics';
+
 const DB_NAME = 'identityhide';
 const DB_VERSION = 1;
 const STORE = 'session';
@@ -24,10 +26,21 @@ function openDB() {
   });
 }
 
-function canvasToBlob(canvas) {
+// `name` only labels the diagnostics entry (?diag=1) — see perfDiagnostics.js.
+function canvasToBlob(canvas, name) {
   return new Promise((resolve) => {
     if (!canvas || !canvas.width || !canvas.height) { resolve(null); return; }
-    canvas.toBlob((blob) => resolve(blob), 'image/png');
+    const endEncode = diagSpan('encode', { name, w: canvas.width, h: canvas.height });
+    // syncMs = how long the toBlob() call itself blocked. Engines that encode
+    // synchronously (WebKit) spend the whole encode here, on the main thread;
+    // ones that encode off-thread return almost immediately.
+    let syncMs = 0;
+    const t0 = performance.now();
+    canvas.toBlob((blob) => {
+      endEncode({ syncMs, kb: blob ? Math.round(blob.size / 1024) : 0 });
+      resolve(blob);
+    }, 'image/png');
+    syncMs = Math.round(performance.now() - t0);
   });
 }
 
@@ -66,12 +79,12 @@ export async function saveSession({ originalFile, screen, blurSettings, feather,
   originalCanvas, fullResCanvas }) {
   const [tattooBlob, strippedBlob, inpaintedBlob, outputBlob, originalBlob, fullResBlob] =
     await Promise.all([
-      canvasToBlob(tattooMaskCanvas),
-      canvasToBlob(strippedCanvas),
-      canvasToBlob(inpaintedCanvas),
-      canvasToBlob(outputCanvas),
-      canvasToBlob(originalCanvas),
-      canvasToBlob(fullResCanvas),
+      canvasToBlob(tattooMaskCanvas, 'tattooMask'),
+      canvasToBlob(strippedCanvas, 'stripped'),
+      canvasToBlob(inpaintedCanvas, 'inpainted'),
+      canvasToBlob(outputCanvas, 'output'),
+      canvasToBlob(originalCanvas, 'original'),
+      canvasToBlob(fullResCanvas, 'fullRes'),
     ]);
 
   const data = {
@@ -91,11 +104,13 @@ export async function saveSession({ originalFile, screen, blurSettings, feather,
     savedAt: Date.now(),
   };
 
+  const endPut = diagSpan('idb-put');
   const db = await openDB();
   try {
     const tx = db.transaction(STORE, 'readwrite');
     tx.objectStore(STORE).put(data, SESSION_KEY);
     await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
+    endPut();
   } finally {
     db.close();
   }
@@ -129,6 +144,7 @@ export async function loadSession() {
     return null;
   }
 
+  const endDecode = diagSpan('restore-decode');
   const [tattooMaskCanvas, strippedCanvas, inpaintedCanvas, outputCanvas, originalCanvas, fullResCanvas] =
     await Promise.all([
       blobToCanvas(data.tattooMaskBlob),
@@ -138,6 +154,7 @@ export async function loadSession() {
       blobToCanvas(data.originalBlob),
       blobToCanvas(data.fullResBlob),
     ]);
+  endDecode();
 
   return {
     originalFile: data.originalFile,
