@@ -1,10 +1,17 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import { saveSession, clearSession } from '../utils/sessionStore';
+import { encodeCanvas, writeSession, clearSession } from '../utils/sessionStore';
+import { createSessionSaver } from '../utils/sessionSaver';
 import { diagLog, diagSpan } from '../utils/perfDiagnostics';
 import { getTierMP, getSavedTierKey } from '../utils/resolutionTiers';
 import { migrateBlurSettings } from '../utils/blurEngine';
 
 const PipelineContext = createContext(null);
+
+// The persisted settings. One builder for both the save path and the restore
+// path, so they produce identical JSON — the session saver compares it as a
+// string to decide whether anything changed.
+const sessionMeta = ({ screen, blurSettings, feather, detections, editDets, tierMP }) =>
+  ({ screen, blurSettings, feather, detections, editDets, tierMP });
 
 export function PipelineProvider({ children }) {
   const [screen, setScreen] = useState('drop');
@@ -40,7 +47,6 @@ export function PipelineProvider({ children }) {
   const tattooMaskCanvasRef = useRef(null);
   const samScaleRef = useRef(null);
   const inpaintedCanvasRef = useRef(null);
-  const fullResCanvasRef = useRef(null);
   const faceBlurCanvasRef = useRef(null);
   const tattooMaskDirtyRef = useRef(true);
   // Tracks whether we've already consumed a free tattoo credit for the
@@ -49,12 +55,15 @@ export function PipelineProvider({ children }) {
   // — that would charge users for iteration, not for distinct photos. The
   // flag is reset on reset() and at the start of every runPipeline.
   const tattooCreditClaimedRef = useRef(false);
+  // Incremental session saver (see sessionSaver.js) — one per provider, it
+  // remembers what is already on disk.
+  const [saver] = useState(() => createSessionSaver({ encode: encodeCanvas, write: writeSession }));
   const [editDets, setEditDets] = useState([]);
   const [editorReturnMode, setEditorReturnMode] = useState(null);
 
   const reset = useCallback(() => {
     // Release canvas bitmap memory before clearing refs
-    const canvasRefs = [strippedCanvasRef, originalCanvasRef, outputCanvasRef, tattooMaskCanvasRef, inpaintedCanvasRef, fullResCanvasRef, faceBlurCanvasRef];
+    const canvasRefs = [strippedCanvasRef, originalCanvasRef, outputCanvasRef, tattooMaskCanvasRef, inpaintedCanvasRef, faceBlurCanvasRef];
     for (const ref of canvasRefs) {
       if (ref.current) {
         ref.current.width = 0;
@@ -63,6 +72,7 @@ export function PipelineProvider({ children }) {
       }
     }
 
+    saver.reset(); // also stops an in-flight save from writing
     clearSession();
     setScreen('drop');
     setOriginalFile(null);
@@ -81,7 +91,7 @@ export function PipelineProvider({ children }) {
     tattooCreditClaimedRef.current = false;
     setEditDets([]);
     setEditorReturnMode(null);
-  }, []);
+  }, [saver]);
 
   // Auto-save to IndexedDB when screen changes (debounced to avoid thrashing)
   const saveTimerRef = useRef(null);
@@ -105,21 +115,18 @@ export function PipelineProvider({ children }) {
       diagLog('save-start');
       const endSave = diagSpan('save-end');
       try {
-        await saveSession({
+        // The saver diffs against what's already on disk and writes only the
+        // change; canvases are read when the save actually starts.
+        await saver.save(() => ({
+          meta: sessionMeta({ screen, blurSettings, feather, detections, editDets, tierMP: selectedTierMP }),
           originalFile,
-          screen,
-          blurSettings,
-          feather,
-          detections,
-          editDets,
-          tierMP: selectedTierMP,
-          tattooMaskCanvas: tattooMaskCanvasRef.current,
-          strippedCanvas: strippedCanvasRef.current,
-          inpaintedCanvas: inpaintedCanvasRef.current,
-          outputCanvas: outputCanvasRef.current,
-          originalCanvas: originalCanvasRef.current,
-          fullResCanvas: fullResCanvasRef.current,
-        });
+          canvases: {
+            tattooMask: tattooMaskCanvasRef.current,
+            stripped: strippedCanvasRef.current,
+            inpainted: inpaintedCanvasRef.current,
+            output: outputCanvasRef.current,
+          },
+        }));
         saveFailedRef.current = false;
         endSave();
       } catch (e) {
@@ -138,27 +145,50 @@ export function PipelineProvider({ children }) {
       }
     }, 1000);
     return () => clearTimeout(saveTimerRef.current);
-  }, [screen, originalFile, blurSettings, feather, detections, editDets, status, selectedTierMP]);
+  }, [screen, originalFile, blurSettings, feather, detections, editDets, status, selectedTierMP, saver]);
 
   const restoreSession = useCallback((session) => {
+    const restored = {
+      screen: session.screen || 'mask-edit',
+      blurSettings: migrateBlurSettings(session.blurSettings) || { mode: 'gaussian', stickerEnabled: false, strength: 20, barWidth: 20, barLength: 110, barAngle: 0, barStyle: 'solid', barColor: '#000000' },
+      feather: session.feather || 0,
+      detections: session.detections || [],
+      editDets: session.editDets || [],
+      // Sessions saved before resolution tiers existed have no tierMP — default
+      // to 1 MP, which matches the old hardcoded WORKING_MP behaviour.
+      tierMP: session.tierMP || 1,
+    };
     setOriginalFile(session.originalFile);
-    setBlurSettings(migrateBlurSettings(session.blurSettings) || { mode: 'gaussian', stickerEnabled: false, strength: 20, barWidth: 20, barLength: 110, barAngle: 0, barStyle: 'solid', barColor: '#000000' });
-    setFeather(session.feather || 0);
-    setDetections(session.detections || []);
-    setEditDets(session.editDets || []);
-    // Sessions saved before resolution tiers existed have no tierMP — default
-    // to 1 MP, which matches the old hardcoded WORKING_MP behaviour.
-    setSelectedTierMP(session.tierMP || 1);
+    setBlurSettings(restored.blurSettings);
+    setFeather(restored.feather);
+    setDetections(restored.detections);
+    setEditDets(restored.editDets);
+    setSelectedTierMP(restored.tierMP);
     if (session.strippedCanvas) strippedCanvasRef.current = session.strippedCanvas;
     if (session.originalCanvas) originalCanvasRef.current = session.originalCanvas;
     if (session.outputCanvas) outputCanvasRef.current = session.outputCanvas;
     if (session.tattooMaskCanvas) tattooMaskCanvasRef.current = session.tattooMaskCanvas;
     if (session.inpaintedCanvas) inpaintedCanvasRef.current = session.inpaintedCanvas;
-    if (session.fullResCanvas) fullResCanvasRef.current = session.fullResCanvas;
+    // What was just loaded is, by definition, already on disk — without this
+    // the state changes below would trigger a full re-save of the session the
+    // moment the editor appears. (A legacy-layout session has nothing under
+    // the new keys yet, so it must be written in full once.)
+    if (!session.legacy) {
+      saver.adopt({
+        meta: sessionMeta(restored),
+        originalFile: session.originalFile,
+        canvases: {
+          tattooMask: tattooMaskCanvasRef.current,
+          stripped: strippedCanvasRef.current,
+          inpainted: inpaintedCanvasRef.current,
+          output: outputCanvasRef.current,
+        },
+      });
+    }
     tattooMaskDirtyRef.current = false;
     setStatus('ready');
-    setScreen(session.screen || 'mask-edit');
-  }, []);
+    setScreen(restored.screen);
+  }, [saver]);
 
   // Memoize so consumers don't re-render every time the provider re-renders.
   // Refs are stable and setters are stable, so only the listed state values
@@ -182,7 +212,6 @@ export function PipelineProvider({ children }) {
     tattooMaskCanvasRef,
     samScaleRef,
     inpaintedCanvasRef,
-    fullResCanvasRef,
     faceBlurCanvasRef,
     tattooMaskDirtyRef,
     tattooCreditClaimedRef,

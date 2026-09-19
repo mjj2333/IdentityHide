@@ -37,7 +37,6 @@ export function useImagePipeline() {
     outputCanvasRef,
     tattooMaskCanvasRef,
     inpaintedCanvasRef,
-    fullResCanvasRef,
     tattooCreditClaimedRef,
     setScreen,
   } = usePipeline();
@@ -59,7 +58,7 @@ export function useImagePipeline() {
       if (tattooCreditClaimedRef) tattooCreditClaimedRef.current = false;
 
       // Release previous canvas bitmap memory before allocating new ones
-      for (const ref of [fullResCanvasRef, strippedCanvasRef, originalCanvasRef, outputCanvasRef, tattooMaskCanvasRef, inpaintedCanvasRef]) {
+      for (const ref of [strippedCanvasRef, originalCanvasRef, outputCanvasRef, tattooMaskCanvasRef, inpaintedCanvasRef]) {
         if (ref.current) { ref.current.width = 0; ref.current.height = 0; }
       }
 
@@ -80,19 +79,24 @@ export function useImagePipeline() {
         cleanCanvas = capped.canvas;
       }
 
-      // Store the (capped) clean canvas for the before/after compare slider.
-      fullResCanvasRef.current = cleanCanvas;
-
       // Downscale to the user-selected working resolution (Quick 1MP / Original)
       const { canvas: workCanvas } = downscaleToMegapixels(cleanCanvas, tierMP);
       strippedCanvasRef.current = workCanvas;
 
-      // Full-res copy for before/after comparison
-      const origCopy = document.createElement('canvas');
-      origCopy.width = cleanCanvas.width;
-      origCopy.height = cleanCanvas.height;
-      origCopy.getContext('2d').drawImage(cleanCanvas, 0, 0);
-      originalCanvasRef.current = origCopy;
+      // Original for the before/after compare. downscaleToMegapixels hands
+      // back the SAME canvas when no downscale was needed; the working canvas
+      // is freed and replaced after tattoo removal, so in that case the
+      // original needs its own copy. Otherwise the clean canvas simply becomes
+      // the original — no second full-resolution buffer (~49 MB at 12 MP).
+      if (workCanvas === cleanCanvas) {
+        const origCopy = document.createElement('canvas');
+        origCopy.width = cleanCanvas.width;
+        origCopy.height = cleanCanvas.height;
+        origCopy.getContext('2d').drawImage(cleanCanvas, 0, 0);
+        originalCanvasRef.current = origCopy;
+      } else {
+        originalCanvasRef.current = cleanCanvas;
+      }
 
       // Working-res output
       const output = document.createElement('canvas');
@@ -133,7 +137,7 @@ export function useImagePipeline() {
   }, [
     detect, setDetections,
     setMetadata, setStatus, setError, setWarning, setScreen,
-    fullResCanvasRef, strippedCanvasRef, originalCanvasRef, outputCanvasRef,
+    strippedCanvasRef, originalCanvasRef, outputCanvasRef,
     tattooMaskCanvasRef, inpaintedCanvasRef,
   ]);
 

@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { usePipeline } from '../context/PipelineContext';
 import { applyMaskedBlur, stackBlur, drawRegionMask } from '../utils/blurEngine';
+import { bumpCanvasRevision } from '../utils/canvasRevision';
 import { track } from '../utils/analytics';
 import { useZoomPan } from '../hooks/useZoomPan';
 import { useCoachMarks, suppressAllWalkthroughs } from '../hooks/useCoachMarks';
@@ -231,6 +232,7 @@ export default function ReviewScreen() {
     if (tattooMaskCanvasRef.current) {
       const ctx = tattooMaskCanvasRef.current.getContext('2d');
       ctx.clearRect(0, 0, tattooMaskCanvasRef.current.width, tattooMaskCanvasRef.current.height);
+      bumpCanvasRevision(tattooMaskCanvasRef.current);
     }
     tattooMaskDirtyRef.current = true;
     setShowTouchUpConfirm(false);

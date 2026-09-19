@@ -274,8 +274,8 @@ export default function ExportScreen({ onFeedback }) {
   };
 
   // Export is at the working/tier resolution (see buildExportOutput), so the
-  // dims label should match outputCanvasRef — not fullResCanvasRef, which is
-  // the untouched source and no longer what gets written.
+  // dims label should match outputCanvasRef — not originalCanvasRef, which is
+  // the untouched source and not what gets written.
   const dims = outputCanvasRef.current
     ? `${outputCanvasRef.current.width}x${outputCanvasRef.current.height}`
     : '';

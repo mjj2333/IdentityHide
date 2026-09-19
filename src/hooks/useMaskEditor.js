@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback } from 'react';
+import { bumpCanvasRevision } from '../utils/canvasRevision';
 
 const MAX_HISTORY = 15;
 
@@ -66,6 +67,7 @@ export function useMaskEditor(tattooMaskCanvasRef, samScaleRef, imageWidth, imag
     const mask = tattooMaskCanvasRef.current;
     if (!mask) return;
     restoreAlpha(mask.getContext('2d'), historyStack.current[historyIndex.current], mask.width, mask.height);
+    bumpCanvasRevision(mask);
     setCanUndo(historyIndex.current > 0);
     setCanRedo(true);
     updateHistoryDepth();
@@ -78,6 +80,7 @@ export function useMaskEditor(tattooMaskCanvasRef, samScaleRef, imageWidth, imag
     const mask = tattooMaskCanvasRef.current;
     if (!mask) return;
     restoreAlpha(mask.getContext('2d'), historyStack.current[historyIndex.current], mask.width, mask.height);
+    bumpCanvasRevision(mask);
     setCanUndo(true);
     setCanRedo(historyIndex.current < historyStack.current.length - 1);
     updateHistoryDepth();
@@ -95,6 +98,7 @@ export function useMaskEditor(tattooMaskCanvasRef, samScaleRef, imageWidth, imag
     const mask = tattooMaskCanvasRef.current;
     if (!mask) return;
     mask.getContext('2d').clearRect(0, 0, mask.width, mask.height);
+    bumpCanvasRevision(mask);
     saveToHistory();
     updateHistoryDepth();
   }, [tattooMaskCanvasRef, saveToHistory, updateHistoryDepth]);
@@ -151,6 +155,8 @@ export function useMaskEditor(tattooMaskCanvasRef, samScaleRef, imageWidth, imag
     }
     ctx.stroke();
     ctx.globalCompositeOperation = 'source-over';
+    // In-place edit — lets the session saver know the mask needs re-encoding.
+    bumpCanvasRevision(mask);
   }, [tattooMaskCanvasRef]);
 
   // --- Pointer event handlers ---
