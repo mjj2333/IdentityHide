@@ -7,6 +7,8 @@ import { uploadImage, uploadMask, queueAndWait, downloadOutputImage, prewarmFlux
 import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from '../utils/comfyuiWorkflows';
 import { useFaceDetection } from './useFaceDetection';
 import { applyMaskedBlur, drawRegionMask } from '../utils/blurEngine';
+import { isInpaintCompositeEnabled } from '../utils/featureFlags';
+import { compositeInpaint } from '../utils/inpaintComposite';
 import { track } from '../utils/analytics';
 
 // Default working-resolution megapixel count. Callers (post-upload modal)
@@ -252,6 +254,19 @@ export function useImagePipeline() {
           rctx.imageSmoothingQuality = 'high';
           rctx.drawImage(resultCanvas, 0, 0, inpaintSrc.width, inpaintSrc.height);
           resultCanvas = resized;
+        }
+
+        // Opt-in (?composite=1): keep the ORIGINAL pixels outside a grown,
+        // feathered copy of the painted mask instead of adopting the model's
+        // whole re-decoded frame — see inpaintComposite.js. The result is at
+        // the full working resolution, so nothing downstream changes size.
+        // Flag off = the behaviour above, untouched.
+        if (isInpaintCompositeEnabled()) {
+          const composited = compositeInpaint({ original: src, generated: resultCanvas, inpaintMask: maskToUpload });
+          resultCanvas.width = 0;
+          resultCanvas.height = 0;
+          resultCanvas = composited;
+          console.log(`[PIPELINE] Composited onto original: ${resultCanvas.width}x${resultCanvas.height}`);
         }
 
         // Free the capped copy if downscaleToMegapixels allocated a new one.

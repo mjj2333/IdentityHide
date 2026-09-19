@@ -4,6 +4,7 @@ import App from './App.jsx'
 import { initSentry, captureException } from './utils/sentry.js'
 import { getNativePlatform } from './utils/platform.js'
 import { initDiagnostics } from './utils/perfDiagnostics.js'
+import { initFeatureFlags } from './utils/featureFlags.js'
 
 // Self-hosted fonts (bundled via @fontsource-variable). Loading here once
 // so Fraunces/Inter/JetBrains Mono are available everywhere the app
@@ -21,6 +22,8 @@ initSentry();
 // Opt-in on-device diagnostics (?diag=1). Read here, before the app mounts,
 // because ScreenRouter's first history.replaceState strips the query string.
 initDiagnostics();
+// Opt-in feature flags (e.g. ?composite=1) — same timing constraint.
+initFeatureFlags();
 
 // Tag <html> with the native platform ('platform-ios' / 'platform-android') at
 // startup so CSS can scope platform-specific fixes (e.g. iOS home-indicator /
