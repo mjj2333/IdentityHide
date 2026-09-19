@@ -14,6 +14,7 @@ import { captureException } from './utils/sentry';
 import { track } from './utils/analytics';
 import { isNativeApp } from './utils/platform';
 import { isDiagEnabled } from './utils/perfDiagnostics';
+import FlagBadge from './components/FlagBadge';
 import DeepLinkHandler from './components/DeepLinkHandler';
 import BackButtonHandler from './components/BackButtonHandler';
 import StatusBarConfig from './components/StatusBarConfig';
@@ -377,6 +378,7 @@ export default function App() {
           {!isNativeApp() && <InstallPrompt />}
           {updatePrompt}
           {isDiagEnabled() && <Suspense fallback={null}><DiagPanel /></Suspense>}
+          <FlagBadge />
         </BatchProvider>
       </PipelineProvider>
     </EntitlementProvider>

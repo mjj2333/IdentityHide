@@ -1,0 +1,22 @@
+// @vitest-environment jsdom
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { render, screen, cleanup } from '@testing-library/react';
+import FlagBadge from '../FlagBadge';
+import { initFeatureFlags } from '../../utils/featureFlags';
+
+beforeEach(() => { localStorage.clear(); });
+afterEach(() => { cleanup(); localStorage.clear(); initFeatureFlags(''); });
+
+describe('FlagBadge', () => {
+  it('renders nothing when no opt-in flag is on (what every normal user sees)', () => {
+    initFeatureFlags('');
+    const { container } = render(<FlagBadge />);
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('says so on screen when the composite flag is on, so an A/B tester knows which mode ran', () => {
+    initFeatureFlags('?composite=1');
+    render(<FlagBadge />);
+    expect(screen.getByText(/composite on/i)).toBeTruthy();
+  });
+});

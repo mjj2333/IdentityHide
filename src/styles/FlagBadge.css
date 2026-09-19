@@ -1,0 +1,16 @@
+/* Opt-in feature-flag marker (FlagBadge.jsx) — sits just under where the DIAG pill goes,
+   never intercepts touches. */
+.flag-badge {
+  position: fixed;
+  left: calc(8px + env(safe-area-inset-left, 0px));
+  top: calc(78px + env(safe-area-inset-top, 0px));
+  z-index: 10000;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.35;
+  color: #0d0c0a;
+  background: rgba(255, 196, 61, 0.95);
+  pointer-events: none;
+}
