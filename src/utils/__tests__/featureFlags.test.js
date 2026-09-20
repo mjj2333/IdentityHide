@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resolveFlag, initFeatureFlags, isInpaintCompositeEnabled, isGrainMatchEnabled, COMPOSITE_FLAG_KEY, GRAIN_FLAG_KEY } from '../featureFlags';
+import { resolveFlag, initFeatureFlags, isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, COMPOSITE_FLAG_KEY, GRAIN_FLAG_KEY, COLORFIT_FLAG_KEY } from '../featureFlags';
 
 beforeEach(() => {
   localStorage.clear();
@@ -79,6 +79,30 @@ describe('grain match flag', () => {
     initFeatureFlags('?composite=1&grain=1');
     initFeatureFlags('?grain=0');
     expect(isGrainMatchEnabled()).toBe(false);
+    expect(isInpaintCompositeEnabled()).toBe(true);
+  });
+});
+
+describe('colour fit flag', () => {
+  it('is off by default', () => {
+    expect(isColourFitEnabled()).toBe(false);
+  });
+
+  it('turns on with ?colorfit=1, persists, and turns off with ?colorfit=0', () => {
+    initFeatureFlags('?colorfit=1');
+    expect(isColourFitEnabled()).toBe(true);
+    expect(localStorage.getItem(COLORFIT_FLAG_KEY)).toBe('1');
+    initFeatureFlags('');
+    expect(isColourFitEnabled()).toBe(true);
+    initFeatureFlags('?colorfit=0');
+    expect(isColourFitEnabled()).toBe(false);
+  });
+
+  it('is independent of compositing (it is the no-compositing alternative, but can also be combined)', () => {
+    initFeatureFlags('?colorfit=1');
+    expect(isInpaintCompositeEnabled()).toBe(false);
+    initFeatureFlags('?composite=1');
+    expect(isColourFitEnabled()).toBe(true);
     expect(isInpaintCompositeEnabled()).toBe(true);
   });
 });

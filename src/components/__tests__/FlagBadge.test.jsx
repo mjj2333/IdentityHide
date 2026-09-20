@@ -26,6 +26,18 @@ describe('FlagBadge', () => {
     expect(screen.getByText(/composite \+ grain/i)).toBeTruthy();
   });
 
+  it('names colour fit on its own', () => {
+    initFeatureFlags('?colorfit=1');
+    render(<FlagBadge />);
+    expect(screen.getByText(/^colorfit on$/i)).toBeTruthy();
+  });
+
+  it('names every active flag when several are combined', () => {
+    initFeatureFlags('?colorfit=1&composite=1&grain=1');
+    render(<FlagBadge />);
+    expect(screen.getByText(/^colorfit \+ composite \+ grain$/i)).toBeTruthy();
+  });
+
   it('shows nothing when grain was requested without compositing (it has no effect there)', () => {
     initFeatureFlags('?grain=1');
     const { container } = render(<FlagBadge />);

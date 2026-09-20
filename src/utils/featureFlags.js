@@ -8,9 +8,11 @@
 
 export const COMPOSITE_FLAG_KEY = 'ih_flag_composite';
 export const GRAIN_FLAG_KEY = 'ih_flag_grain';
+export const COLORFIT_FLAG_KEY = 'ih_flag_colorfit';
 
 let inpaintComposite = false;
 let grainMatch = false;
+let colourFit = false;
 
 export function resolveFlag(param, storageKey, search, storage) {
   try {
@@ -29,6 +31,7 @@ export function initFeatureFlags(search = globalThis.location?.search) {
   try { storage = globalThis.localStorage; } catch { /* unavailable */ }
   inpaintComposite = !!storage && resolveFlag('composite', COMPOSITE_FLAG_KEY, search, storage);
   grainMatch = !!storage && resolveFlag('grain', GRAIN_FLAG_KEY, search, storage);
+  colourFit = !!storage && resolveFlag('colorfit', COLORFIT_FLAG_KEY, search, storage);
 }
 
 /**
@@ -47,4 +50,15 @@ export function isInpaintCompositeEnabled() {
  */
 export function isGrainMatchEnabled() {
   return inpaintComposite && grainMatch;
+}
+
+/**
+ * Undo the inpaint round trip's colour loss by fitting a colour transform on
+ * the untouched pixels (see colorFit.js). Changes nothing else about the
+ * result — no compositing — so removal behaves exactly as it always has.
+ * Independent of the composite flag; with both on, the fill is colour-fitted
+ * before it is composited.
+ */
+export function isColourFitEnabled() {
+  return colourFit;
 }

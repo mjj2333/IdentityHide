@@ -11,7 +11,8 @@ import {
   prewarmFluxModels,
 } from './comfyuiApi';
 import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from './comfyuiWorkflows';
-import { isInpaintCompositeEnabled, isGrainMatchEnabled } from './featureFlags';
+import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled } from './featureFlags';
+import { colourFitInpaint } from './inpaintColorFit';
 import { compositeInpaint } from './inpaintComposite';
 
 const MASK_ALPHA_THRESHOLD = 128;
@@ -294,6 +295,21 @@ async function runComfyUIInpaint(imageEntry, tierMP, signal, onStepProgress) {
 
   onStepProgress(0.85, 'Downloading result');
   let result = await downloadOutputImage(history, TATTOO_ONLY_OUTPUT_NODE_ID, { signal });
+
+  // Opt-in (?colorfit=1): undo the round trip's colour loss — see
+  // inpaintColorFit.js. Needs the result at the upload's exact size (the VAE
+  // can round by a few px), and must run before uploadSrc is freed below.
+  if (isColourFitEnabled()) {
+    if (result.width !== uploadSrc.width || result.height !== uploadSrc.height) {
+      const fitted = document.createElement('canvas');
+      fitted.width = uploadSrc.width;
+      fitted.height = uploadSrc.height;
+      fitted.getContext('2d').drawImage(result, 0, 0, uploadSrc.width, uploadSrc.height);
+      result.width = 0; result.height = 0;
+      result = fitted;
+    }
+    colourFitInpaint({ generated: result, reference: uploadSrc, inpaintMask: uploadMaskCanvas });
+  }
 
   // Opt-in (?composite=1): keep the ORIGINAL pixels outside a grown, feathered
   // copy of the painted mask — see inpaintComposite.js. The composite is

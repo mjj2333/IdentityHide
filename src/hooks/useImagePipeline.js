@@ -7,7 +7,8 @@ import { uploadImage, uploadMask, queueAndWait, downloadOutputImage, prewarmFlux
 import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from '../utils/comfyuiWorkflows';
 import { useFaceDetection } from './useFaceDetection';
 import { applyMaskedBlur, drawRegionMask } from '../utils/blurEngine';
-import { isInpaintCompositeEnabled, isGrainMatchEnabled } from '../utils/featureFlags';
+import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled } from '../utils/featureFlags';
+import { colourFitInpaint } from '../utils/inpaintColorFit';
 import { compositeInpaint } from '../utils/inpaintComposite';
 import { track } from '../utils/analytics';
 
@@ -254,6 +255,13 @@ export function useImagePipeline() {
           rctx.imageSmoothingQuality = 'high';
           rctx.drawImage(resultCanvas, 0, 0, inpaintSrc.width, inpaintSrc.height);
           resultCanvas = resized;
+        }
+
+        // Opt-in (?colorfit=1): undo the round trip's colour loss by fitting a
+        // colour transform on the untouched pixels — see inpaintColorFit.js.
+        // Nothing else about the result changes. Flag off = untouched.
+        if (isColourFitEnabled()) {
+          colourFitInpaint({ generated: resultCanvas, reference: inpaintSrc, inpaintMask: maskToUpload });
         }
 
         // Opt-in (?composite=1): keep the ORIGINAL pixels outside a grown,

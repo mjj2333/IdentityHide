@@ -1,4 +1,4 @@
-import { isInpaintCompositeEnabled, isGrainMatchEnabled } from '../utils/featureFlags';
+import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled } from '../utils/featureFlags';
 import '../styles/FlagBadge.css';
 
 /**
@@ -7,10 +7,15 @@ import '../styles/FlagBadge.css';
  * can't tell which mode a result came from. Normal users never see it.
  */
 export default function FlagBadge() {
-  if (!isInpaintCompositeEnabled()) return null;
+  const active = [
+    isColourFitEnabled() && 'COLORFIT',
+    isInpaintCompositeEnabled() && 'COMPOSITE',
+    isGrainMatchEnabled() && 'GRAIN',
+  ].filter(Boolean);
+  if (active.length === 0) return null;
   return (
     <div className="flag-badge" aria-hidden="true">
-      {isGrainMatchEnabled() ? 'COMPOSITE + GRAIN' : 'COMPOSITE ON'}
+      {active.length === 1 ? `${active[0]} ON` : active.join(' + ')}
     </div>
   );
 }
