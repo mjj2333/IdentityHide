@@ -276,8 +276,8 @@ async function runComfyUIInpaint(imageEntry, tierMP, signal, onStepProgress) {
     uploadMaskCanvas = m;
   }
 
-  // Opt-in: ?maskgrow=1 grows the mask (inpaintMaskGrow.js), ?cleanfill=1 sends
-  // the skin-only prompt (CLEAN_SKIN_PROMPT). Both off = untouched.
+  // Opt-in: ?maskgrow=1 grows the mask (inpaintMaskGrow.js). On by default
+  // (?cleanfill=0 switches it off): the skin-only prompt (CLEAN_SKIN_PROMPT).
   const cleanFill = isCleanFillEnabled();
   if (isMaskGrowEnabled()) uploadMaskCanvas = growInpaintMask(uploadMaskCanvas);
 
@@ -302,7 +302,7 @@ async function runComfyUIInpaint(imageEntry, tierMP, signal, onStepProgress) {
   onStepProgress(0.85, 'Downloading result');
   let result = await downloadOutputImage(history, TATTOO_ONLY_OUTPUT_NODE_ID, { signal });
 
-  // Opt-in (?colorfit=1): undo the round trip's colour loss — see
+  // On by default (?colorfit=0 switches it off): undo the round trip's colour loss — see
   // inpaintColorFit.js. Needs the result at the upload's exact size (the VAE
   // can round by a few px), and must run before uploadSrc is freed below.
   if (isColourFitEnabled()) {

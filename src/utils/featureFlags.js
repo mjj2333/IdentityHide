@@ -1,9 +1,15 @@
 /**
- * Opt-in feature flags for trying a change on a real device before it becomes
- * the default. `?<name>=1` turns a flag on and persists it in localStorage (the
- * router strips the query string on first render, and an installed PWA can't
- * be given one at all after that); `?<name>=0` turns it off and forgets it.
- * Everything is OFF unless someone has explicitly opted in on that browser.
+ * Feature flags for trying a change on a real device before it becomes the
+ * default, and for switching a new default back off if it misbehaves.
+ * `?<name>=1` / `?<name>=0` set a flag and the choice persists in localStorage
+ * (the router strips the query string on first render, and an installed PWA
+ * can't be given one at all after that).
+ *
+ *   Opt-in (off unless `?name=1`):      composite, grain, maskgrow
+ *   Default on (on unless `?name=0`):   cleanfill, colorfit
+ *
+ * Only a departure from the default is stored: an opt-in flag stores '1' and
+ * `=0` forgets it; a default-on flag stores '0' and `=1` forgets it.
  */
 
 export const COMPOSITE_FLAG_KEY = 'ih_flag_composite';
@@ -14,18 +20,25 @@ export const MASKGROW_FLAG_KEY = 'ih_flag_maskgrow';
 
 let inpaintComposite = false;
 let grainMatch = false;
-let colourFit = false;
-let cleanFill = false;
+let colourFit = true;
+let cleanFill = true;
 let maskGrow = false;
 
-export function resolveFlag(param, storageKey, search, storage) {
+export function resolveFlag(param, storageKey, search, storage, defaultOn = false) {
+  const value = new URLSearchParams(search || '').get(param);
   try {
-    const value = new URLSearchParams(search || '').get(param);
+    if (defaultOn) {
+      if (value === '0') storage.setItem(storageKey, '0');
+      if (value === '1') storage.removeItem(storageKey);
+      return storage.getItem(storageKey) !== '0';
+    }
     if (value === '1') storage.setItem(storageKey, '1');
     if (value === '0') storage.removeItem(storageKey);
     return storage.getItem(storageKey) === '1';
   } catch {
-    return false;
+    // No storage (private mode, blocked): an experiment stays off; a default
+    // stays on, except that an explicit =0 still counts for this page load.
+    return defaultOn ? value !== '0' : false;
   }
 }
 
@@ -35,8 +48,8 @@ export function initFeatureFlags(search = globalThis.location?.search) {
   try { storage = globalThis.localStorage; } catch { /* unavailable */ }
   inpaintComposite = !!storage && resolveFlag('composite', COMPOSITE_FLAG_KEY, search, storage);
   grainMatch = !!storage && resolveFlag('grain', GRAIN_FLAG_KEY, search, storage);
-  colourFit = !!storage && resolveFlag('colorfit', COLORFIT_FLAG_KEY, search, storage);
-  cleanFill = !!storage && resolveFlag('cleanfill', CLEANFILL_FLAG_KEY, search, storage);
+  colourFit = resolveFlag('colorfit', COLORFIT_FLAG_KEY, search, storage, true);
+  cleanFill = resolveFlag('cleanfill', CLEANFILL_FLAG_KEY, search, storage, true);
   maskGrow = !!storage && resolveFlag('maskgrow', MASKGROW_FLAG_KEY, search, storage);
 }
 
@@ -59,6 +72,7 @@ export function isGrainMatchEnabled() {
 }
 
 /**
+ * DEFAULT ON (?colorfit=0 switches it off for that browser).
  * Undo the inpaint round trip's colour loss by fitting a colour transform on
  * the untouched pixels (see colorFit.js). Changes nothing else about the
  * result — no compositing — so removal behaves exactly as it always has.
@@ -70,6 +84,7 @@ export function isColourFitEnabled() {
 }
 
 /**
+ * DEFAULT ON (?cleanfill=0 goes back to the long-standing prompt).
  * Send a skin-only positive prompt (see comfyuiWorkflows.CLEAN_SKIN_PROMPT).
  * This flag and the next are the only ones that change what the MODEL is asked
  * to do; the others only change what is done with its answer.

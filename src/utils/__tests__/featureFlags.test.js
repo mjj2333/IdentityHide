@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { resolveFlag, initFeatureFlags, isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled, COMPOSITE_FLAG_KEY, GRAIN_FLAG_KEY, COLORFIT_FLAG_KEY, CLEANFILL_FLAG_KEY, MASKGROW_FLAG_KEY } from '../featureFlags';
+
+const BROKEN_STORAGE = { getItem() { throw new Error('x'); }, setItem() { throw new Error('x'); }, removeItem() { throw new Error('x'); } };
 
 beforeEach(() => {
   localStorage.clear();
   initFeatureFlags('');
 });
 
-describe('resolveFlag', () => {
+describe('resolveFlag (opt-in flag)', () => {
   it('is off by default', () => {
     expect(resolveFlag('composite', 'k', '', localStorage)).toBe(false);
   });
@@ -33,8 +35,36 @@ describe('resolveFlag', () => {
   });
 
   it('is off (and does not throw) when storage is unavailable', () => {
-    const broken = { getItem() { throw new Error('x'); }, setItem() { throw new Error('x'); }, removeItem() { throw new Error('x'); } };
-    expect(resolveFlag('composite', 'k', '?composite=1', broken)).toBe(false);
+    expect(resolveFlag('composite', 'k', '?composite=1', BROKEN_STORAGE)).toBe(false);
+  });
+});
+
+describe('resolveFlag (default-on flag)', () => {
+  it('is on by default', () => {
+    expect(resolveFlag('colorfit', 'k', '', localStorage, true)).toBe(true);
+  });
+
+  it('turns off and REMEMBERS the opt-out for ?colorfit=0', () => {
+    expect(resolveFlag('colorfit', 'k', '?colorfit=0', localStorage, true)).toBe(false);
+    expect(localStorage.getItem('k')).toBe('0');
+    expect(resolveFlag('colorfit', 'k', '', localStorage, true)).toBe(false);   // query string gone, still off
+  });
+
+  it('turns back on and forgets the opt-out for ?colorfit=1', () => {
+    localStorage.setItem('k', '0');
+    expect(resolveFlag('colorfit', 'k', '?colorfit=1', localStorage, true)).toBe(true);
+    expect(localStorage.getItem('k')).toBeNull();
+  });
+
+  it('still reads as on for a browser that opted in back when it was opt-in', () => {
+    localStorage.setItem('k', '1');
+    expect(resolveFlag('colorfit', 'k', '', localStorage, true)).toBe(true);
+  });
+
+  it('is on when storage is unavailable — but ?colorfit=0 is still honoured for that page load', () => {
+    expect(resolveFlag('colorfit', 'k', '', BROKEN_STORAGE, true)).toBe(true);
+    expect(resolveFlag('colorfit', 'k', '', null, true)).toBe(true);
+    expect(resolveFlag('colorfit', 'k', '?colorfit=0', BROKEN_STORAGE, true)).toBe(false);
   });
 });
 
@@ -83,23 +113,24 @@ describe('grain match flag', () => {
   });
 });
 
-describe('colour fit flag', () => {
-  it('is off by default', () => {
-    expect(isColourFitEnabled()).toBe(false);
+describe('colour fit (default on)', () => {
+  it('is on with nothing in the URL or storage — what every normal user gets', () => {
+    expect(isColourFitEnabled()).toBe(true);
   });
 
-  it('turns on with ?colorfit=1, persists, and turns off with ?colorfit=0', () => {
-    initFeatureFlags('?colorfit=1');
-    expect(isColourFitEnabled()).toBe(true);
-    expect(localStorage.getItem(COLORFIT_FLAG_KEY)).toBe('1');
-    initFeatureFlags('');
-    expect(isColourFitEnabled()).toBe(true);
+  it('?colorfit=0 switches it off and that survives a reload; ?colorfit=1 switches it back on', () => {
     initFeatureFlags('?colorfit=0');
     expect(isColourFitEnabled()).toBe(false);
+    expect(localStorage.getItem(COLORFIT_FLAG_KEY)).toBe('0');
+    initFeatureFlags('');
+    expect(isColourFitEnabled()).toBe(false);
+    initFeatureFlags('?colorfit=1');
+    expect(isColourFitEnabled()).toBe(true);
+    initFeatureFlags('');
+    expect(isColourFitEnabled()).toBe(true);
   });
 
   it('is independent of compositing (it is the no-compositing alternative, but can also be combined)', () => {
-    initFeatureFlags('?colorfit=1');
     expect(isInpaintCompositeEnabled()).toBe(false);
     initFeatureFlags('?composite=1');
     expect(isColourFitEnabled()).toBe(true);
@@ -107,26 +138,40 @@ describe('colour fit flag', () => {
   });
 });
 
-describe('clean fill flag', () => {
-  it('is off by default', () => {
-    expect(isCleanFillEnabled()).toBe(false);
+describe('clean fill (default on)', () => {
+  it('is on with nothing in the URL or storage — what every normal user gets', () => {
+    expect(isCleanFillEnabled()).toBe(true);
   });
 
-  it('turns on with ?cleanfill=1, persists, and turns off with ?cleanfill=0', () => {
-    initFeatureFlags('?cleanfill=1');
-    expect(isCleanFillEnabled()).toBe(true);
-    expect(localStorage.getItem(CLEANFILL_FLAG_KEY)).toBe('1');
-    initFeatureFlags('');
-    expect(isCleanFillEnabled()).toBe(true);
+  it('?cleanfill=0 switches it off and that survives a reload; ?cleanfill=1 switches it back on', () => {
     initFeatureFlags('?cleanfill=0');
     expect(isCleanFillEnabled()).toBe(false);
+    expect(localStorage.getItem(CLEANFILL_FLAG_KEY)).toBe('0');
+    initFeatureFlags('');
+    expect(isCleanFillEnabled()).toBe(false);
+    initFeatureFlags('?cleanfill=1');
+    expect(isCleanFillEnabled()).toBe(true);
   });
 
-  it('is independent of the other flags', () => {
-    initFeatureFlags('?cleanfill=1&colorfit=1');
-    expect(isCleanFillEnabled()).toBe(true);
+  it('can be switched off without touching colour fit, and the reverse', () => {
+    initFeatureFlags('?cleanfill=0');
+    expect(isCleanFillEnabled()).toBe(false);
     expect(isColourFitEnabled()).toBe(true);
-    expect(isInpaintCompositeEnabled()).toBe(false);
+    initFeatureFlags('?cleanfill=1&colorfit=0');
+    expect(isCleanFillEnabled()).toBe(true);
+    expect(isColourFitEnabled()).toBe(false);
+  });
+});
+
+describe('defaults before initFeatureFlags has run, or with no storage at all', () => {
+  it('match what initialising with nothing gives: the pair on, the experiments off', async () => {
+    vi.resetModules();
+    const fresh = await import('../featureFlags');
+    expect(fresh.isCleanFillEnabled()).toBe(true);
+    expect(fresh.isColourFitEnabled()).toBe(true);
+    expect(fresh.isMaskGrowEnabled()).toBe(false);
+    expect(fresh.isInpaintCompositeEnabled()).toBe(false);
+    expect(fresh.isGrainMatchEnabled()).toBe(false);
   });
 });
 

@@ -2,22 +2,24 @@ import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, isC
 import '../styles/FlagBadge.css';
 
 /**
- * Tiny on-screen marker shown ONLY while an opt-in feature flag is on (see
- * featureFlags.js). Flags persist per browser, so without this an A/B tester
- * can't tell which mode a result came from. Normal users never see it.
+ * Tiny on-screen marker shown ONLY while this browser departs from the defaults
+ * (see featureFlags.js): an experiment switched on, or a default switched off.
+ * Flags persist per browser, so without this an A/B tester can't tell which
+ * mode a result came from. Normal users never see it.
  */
 export default function FlagBadge() {
-  const active = [
-    isCleanFillEnabled() && 'CLEANFILL',
+  const changed = [
+    !isCleanFillEnabled() && 'CLEANFILL OFF',
     isMaskGrowEnabled() && 'MASKGROW',
-    isColourFitEnabled() && 'COLORFIT',
+    !isColourFitEnabled() && 'COLORFIT OFF',
     isInpaintCompositeEnabled() && 'COMPOSITE',
     isGrainMatchEnabled() && 'GRAIN',
   ].filter(Boolean);
-  if (active.length === 0) return null;
+  if (changed.length === 0) return null;
+  const loneExperiment = changed.length === 1 && !changed[0].endsWith(' OFF');
   return (
     <div className="flag-badge" aria-hidden="true">
-      {active.length === 1 ? `${active[0]} ON` : active.join(' + ')}
+      {loneExperiment ? `${changed[0]} ON` : changed.join(' + ')}
     </div>
   );
 }

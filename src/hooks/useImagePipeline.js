@@ -222,8 +222,8 @@ export function useImagePipeline() {
         // Opt-in (?maskgrow=1): cover the ink the brush missed — see
         // inpaintMaskGrow.js. The grown mask is a new canvas (the user's painted
         // mask is untouched) and is what every later step treats as "the
-        // repainted area". Opt-in (?cleanfill=1): ask only for skin — see
-        // CLEAN_SKIN_PROMPT. Both off = untouched.
+        // repainted area". On by default (?cleanfill=0 switches it off): ask
+        // only for skin — see CLEAN_SKIN_PROMPT.
         const cleanFill = isCleanFillEnabled();
         if (isMaskGrowEnabled()) {
           maskToUpload = growInpaintMask(maskToUpload);
@@ -270,9 +270,9 @@ export function useImagePipeline() {
           resultCanvas = resized;
         }
 
-        // Opt-in (?colorfit=1): undo the round trip's colour loss by fitting a
-        // colour transform on the untouched pixels — see inpaintColorFit.js.
-        // Nothing else about the result changes. Flag off = untouched.
+        // On by default (?colorfit=0 switches it off): undo the round trip's
+        // colour loss by fitting a colour transform on the untouched pixels —
+        // see inpaintColorFit.js. Nothing else about the result changes.
         if (isColourFitEnabled()) {
           colourFitInpaint({ generated: resultCanvas, reference: inpaintSrc, inpaintMask: maskToUpload });
         }

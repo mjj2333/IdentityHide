@@ -9,11 +9,14 @@ const DEFAULT_DENOISE = 1;
 const DEFAULT_LORA_STRENGTH = 0.8;
 const SEED_MAX = 2 ** 53;
 
-// The long-standing positive prompt. Unchanged unless a caller opts out.
+// The long-standing positive prompt: what the builder sends unless the caller
+// passes another. The app passes CLEAN_SKIN_PROMPT by default now, so in
+// practice this is what `?cleanfill=0` falls back to.
 const DEFAULT_POSITIVE_PROMPT = 'bare clean skin, natural human body, anatomically correct hands with five fingers, correct finger count, correct toe count, natural joint anatomy, seamless continuation of surrounding skin tone and texture, matching skin color and lighting, photorealistic, high detail, 8k';
 
 /**
- * Skin-only positive prompt (?cleanfill=1). In Flux the positive prompt is a
+ * Skin-only positive prompt — the app's default (?cleanfill=0 switches back to
+ * the one above). In Flux the positive prompt is a
  * list of things to DRAW, and the negative prompt is inert at cfg 1 — so the
  * anatomy wording above ("hands with five fingers… toe count… joints") makes
  * the model draw line-art hands, fingers and figures on the skin once the
