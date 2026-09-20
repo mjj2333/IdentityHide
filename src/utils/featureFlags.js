@@ -7,8 +7,10 @@
  */
 
 export const COMPOSITE_FLAG_KEY = 'ih_flag_composite';
+export const GRAIN_FLAG_KEY = 'ih_flag_grain';
 
 let inpaintComposite = false;
+let grainMatch = false;
 
 export function resolveFlag(param, storageKey, search, storage) {
   try {
@@ -26,6 +28,7 @@ export function initFeatureFlags(search = globalThis.location?.search) {
   let storage = null;
   try { storage = globalThis.localStorage; } catch { /* unavailable */ }
   inpaintComposite = !!storage && resolveFlag('composite', COMPOSITE_FLAG_KEY, search, storage);
+  grainMatch = !!storage && resolveFlag('grain', GRAIN_FLAG_KEY, search, storage);
 }
 
 /**
@@ -35,4 +38,13 @@ export function initFeatureFlags(search = globalThis.location?.search) {
  */
 export function isInpaintCompositeEnabled() {
   return inpaintComposite;
+}
+
+/**
+ * Add matching photo grain to the composited patch (see grainMatch.js). Only
+ * meaningful on top of compositing — without it there is no separate patch to
+ * match — so ?grain=1 alone does nothing.
+ */
+export function isGrainMatchEnabled() {
+  return inpaintComposite && grainMatch;
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resolveFlag, initFeatureFlags, isInpaintCompositeEnabled, COMPOSITE_FLAG_KEY } from '../featureFlags';
+import { resolveFlag, initFeatureFlags, isInpaintCompositeEnabled, isGrainMatchEnabled, COMPOSITE_FLAG_KEY, GRAIN_FLAG_KEY } from '../featureFlags';
 
 beforeEach(() => {
   localStorage.clear();
@@ -52,5 +52,33 @@ describe('inpaint composite flag', () => {
     expect(isInpaintCompositeEnabled()).toBe(true);
     initFeatureFlags('?composite=0');
     expect(isInpaintCompositeEnabled()).toBe(false);
+  });
+});
+
+describe('grain match flag', () => {
+  it('is off by default', () => {
+    expect(isGrainMatchEnabled()).toBe(false);
+  });
+
+  it('turns on with ?composite=1&grain=1 and persists', () => {
+    initFeatureFlags('?composite=1&grain=1');
+    expect(isGrainMatchEnabled()).toBe(true);
+    expect(localStorage.getItem(GRAIN_FLAG_KEY)).toBe('1');
+    initFeatureFlags('');
+    expect(isGrainMatchEnabled()).toBe(true);
+  });
+
+  it('has no effect unless compositing is on too (grain is applied to the composited patch)', () => {
+    initFeatureFlags('?grain=1');
+    expect(isGrainMatchEnabled()).toBe(false);
+    initFeatureFlags('?composite=1');
+    expect(isGrainMatchEnabled()).toBe(true);
+  });
+
+  it('can be turned off on its own, leaving compositing on', () => {
+    initFeatureFlags('?composite=1&grain=1');
+    initFeatureFlags('?grain=0');
+    expect(isGrainMatchEnabled()).toBe(false);
+    expect(isInpaintCompositeEnabled()).toBe(true);
   });
 });

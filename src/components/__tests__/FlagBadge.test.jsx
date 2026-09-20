@@ -19,4 +19,16 @@ describe('FlagBadge', () => {
     render(<FlagBadge />);
     expect(screen.getByText(/composite on/i)).toBeTruthy();
   });
+
+  it('names both when grain matching is on as well', () => {
+    initFeatureFlags('?composite=1&grain=1');
+    render(<FlagBadge />);
+    expect(screen.getByText(/composite \+ grain/i)).toBeTruthy();
+  });
+
+  it('shows nothing when grain was requested without compositing (it has no effect there)', () => {
+    initFeatureFlags('?grain=1');
+    const { container } = render(<FlagBadge />);
+    expect(container.innerHTML).toBe('');
+  });
 });

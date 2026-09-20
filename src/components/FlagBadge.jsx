@@ -1,4 +1,4 @@
-import { isInpaintCompositeEnabled } from '../utils/featureFlags';
+import { isInpaintCompositeEnabled, isGrainMatchEnabled } from '../utils/featureFlags';
 import '../styles/FlagBadge.css';
 
 /**
@@ -8,5 +8,9 @@ import '../styles/FlagBadge.css';
  */
 export default function FlagBadge() {
   if (!isInpaintCompositeEnabled()) return null;
-  return <div className="flag-badge" aria-hidden="true">COMPOSITE ON</div>;
+  return (
+    <div className="flag-badge" aria-hidden="true">
+      {isGrainMatchEnabled() ? 'COMPOSITE + GRAIN' : 'COMPOSITE ON'}
+    </div>
+  );
 }

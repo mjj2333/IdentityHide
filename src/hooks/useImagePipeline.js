@@ -7,7 +7,7 @@ import { uploadImage, uploadMask, queueAndWait, downloadOutputImage, prewarmFlux
 import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from '../utils/comfyuiWorkflows';
 import { useFaceDetection } from './useFaceDetection';
 import { applyMaskedBlur, drawRegionMask } from '../utils/blurEngine';
-import { isInpaintCompositeEnabled } from '../utils/featureFlags';
+import { isInpaintCompositeEnabled, isGrainMatchEnabled } from '../utils/featureFlags';
 import { compositeInpaint } from '../utils/inpaintComposite';
 import { track } from '../utils/analytics';
 
@@ -262,7 +262,10 @@ export function useImagePipeline() {
         // the full working resolution, so nothing downstream changes size.
         // Flag off = the behaviour above, untouched.
         if (isInpaintCompositeEnabled()) {
-          const composited = compositeInpaint({ original: src, generated: resultCanvas, inpaintMask: maskToUpload });
+          const composited = compositeInpaint({
+            original: src, generated: resultCanvas, inpaintMask: maskToUpload,
+            grainMatch: isGrainMatchEnabled(),
+          });
           resultCanvas.width = 0;
           resultCanvas.height = 0;
           resultCanvas = composited;

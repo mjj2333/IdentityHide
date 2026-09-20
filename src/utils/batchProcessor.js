@@ -11,7 +11,7 @@ import {
   prewarmFluxModels,
 } from './comfyuiApi';
 import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from './comfyuiWorkflows';
-import { isInpaintCompositeEnabled } from './featureFlags';
+import { isInpaintCompositeEnabled, isGrainMatchEnabled } from './featureFlags';
 import { compositeInpaint } from './inpaintComposite';
 
 const MASK_ALPHA_THRESHOLD = 128;
@@ -300,7 +300,10 @@ async function runComfyUIInpaint(imageEntry, tierMP, signal, onStepProgress) {
   // already at strippedCanvas dimensions, so the normalize step below is a
   // no-op for it. Flag off = the behaviour below, untouched.
   if (isInpaintCompositeEnabled()) {
-    const composited = compositeInpaint({ original: src, generated: result, inpaintMask: uploadMaskCanvas });
+    const composited = compositeInpaint({
+      original: src, generated: result, inpaintMask: uploadMaskCanvas,
+      grainMatch: isGrainMatchEnabled(),
+    });
     result.width = 0; result.height = 0;
     result = composited;
   }
