@@ -5,12 +5,13 @@
  *   alpha = smooth ramp 255 → 0      over the next `featherPx`
  *   alpha = 0                        beyond that
  *
- * Used to composite an inpainted result back onto the original: the model
- * rewrites pixels well beyond the painted strokes (measured ~16–24 px at the
- * inpaint resolution, from the latent grid + decoder receptive field), so the
- * composite must take everything within the grow distance from the result and
- * blend out across the feather — a cut at the painted edge would discard real
- * generated content and let faint tattoo edges back in.
+ * Used to mark everything the model may have repainted: it rewrites pixels
+ * well beyond the painted strokes (measured ~16–24 px at the inpaint
+ * resolution, from the latent grid + decoder receptive field), so anything
+ * that must treat "painted" and "untouched" pixels differently — today the
+ * colour fit, which learns only from untouched pixels (inpaintColorFit.js) —
+ * has to grow the painted mask first. The feather is there for callers that
+ * blend across the edge rather than cut.
  *
  * Distances come from a two-pass 3-4 chamfer transform: O(n), a few % off true
  * Euclidean, which is far below what a feathered edge can show. Pure function

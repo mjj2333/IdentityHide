@@ -1,4 +1,4 @@
-import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled } from '../utils/featureFlags';
+import { isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled } from '../utils/featureFlags';
 import '../styles/FlagBadge.css';
 
 /**
@@ -12,8 +12,6 @@ export default function FlagBadge() {
     !isCleanFillEnabled() && 'CLEANFILL OFF',
     isMaskGrowEnabled() && 'MASKGROW',
     !isColourFitEnabled() && 'COLORFIT OFF',
-    isInpaintCompositeEnabled() && 'COMPOSITE',
-    isGrainMatchEnabled() && 'GRAIN',
   ].filter(Boolean);
   if (changed.length === 0) return null;
   const loneExperiment = changed.length === 1 && !changed[0].endsWith(' OFF');

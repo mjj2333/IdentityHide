@@ -3,8 +3,8 @@ import { fitColourTransform, applyColourTransform, IDENTITY_TRANSFORM } from './
 import { diagSpan } from './perfDiagnostics';
 
 // Exclude the repainted area from the fit with the same reach the model has
-// beyond the painted strokes (see inpaintComposite.js: meaningful change to
-// ~16–24 px, back to the noise floor by ~32 px, at the inpaint resolution).
+// beyond the painted strokes (measured: meaningful change to ~16–24 px, back
+// to the noise floor by ~32 px, at the inpaint resolution).
 const EXCLUDE_GROW_PX = 40;
 // Same cut-off uploadMask() uses, so "painted" means what it meant to the model.
 const MASK_ALPHA_THRESHOLD = 128;

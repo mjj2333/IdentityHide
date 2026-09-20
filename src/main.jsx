@@ -22,7 +22,7 @@ initSentry();
 // Opt-in on-device diagnostics (?diag=1). Read here, before the app mounts,
 // because ScreenRouter's first history.replaceState strips the query string.
 initDiagnostics();
-// Opt-in feature flags (e.g. ?composite=1) — same timing constraint.
+// Feature flags (e.g. ?maskgrow=1, ?colorfit=0) — same timing constraint.
 initFeatureFlags();
 
 // Tag <html> with the native platform ('platform-ios' / 'platform-android') at

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { resolveFlag, initFeatureFlags, isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled, COMPOSITE_FLAG_KEY, GRAIN_FLAG_KEY, COLORFIT_FLAG_KEY, CLEANFILL_FLAG_KEY, MASKGROW_FLAG_KEY } from '../featureFlags';
+import { resolveFlag, initFeatureFlags, isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled, COLORFIT_FLAG_KEY, CLEANFILL_FLAG_KEY, MASKGROW_FLAG_KEY } from '../featureFlags';
 
 const BROKEN_STORAGE = { getItem() { throw new Error('x'); }, setItem() { throw new Error('x'); }, removeItem() { throw new Error('x'); } };
 
@@ -11,31 +11,31 @@ beforeEach(() => {
 
 describe('resolveFlag (opt-in flag)', () => {
   it('is off by default', () => {
-    expect(resolveFlag('composite', 'k', '', localStorage)).toBe(false);
+    expect(resolveFlag('maskgrow', 'k', '', localStorage)).toBe(false);
   });
 
-  it('turns on and persists for ?composite=1', () => {
-    expect(resolveFlag('composite', 'k', '?composite=1', localStorage)).toBe(true);
+  it('turns on and persists for ?maskgrow=1', () => {
+    expect(resolveFlag('maskgrow', 'k', '?maskgrow=1', localStorage)).toBe(true);
     expect(localStorage.getItem('k')).toBe('1');
   });
 
   it('stays on from storage once the query string is gone', () => {
     localStorage.setItem('k', '1');
-    expect(resolveFlag('composite', 'k', '', localStorage)).toBe(true);
+    expect(resolveFlag('maskgrow', 'k', '', localStorage)).toBe(true);
   });
 
-  it('turns off and forgets for ?composite=0', () => {
+  it('turns off and forgets for ?maskgrow=0', () => {
     localStorage.setItem('k', '1');
-    expect(resolveFlag('composite', 'k', '?composite=0', localStorage)).toBe(false);
+    expect(resolveFlag('maskgrow', 'k', '?maskgrow=0', localStorage)).toBe(false);
     expect(localStorage.getItem('k')).toBeNull();
   });
 
   it('ignores other parameters', () => {
-    expect(resolveFlag('composite', 'k', '?diag=1&other=1', localStorage)).toBe(false);
+    expect(resolveFlag('maskgrow', 'k', '?diag=1&other=1', localStorage)).toBe(false);
   });
 
   it('is off (and does not throw) when storage is unavailable', () => {
-    expect(resolveFlag('composite', 'k', '?composite=1', BROKEN_STORAGE)).toBe(false);
+    expect(resolveFlag('maskgrow', 'k', '?maskgrow=1', BROKEN_STORAGE)).toBe(false);
   });
 });
 
@@ -68,51 +68,6 @@ describe('resolveFlag (default-on flag)', () => {
   });
 });
 
-describe('inpaint composite flag', () => {
-  it('is off until initialised with ?composite=1', () => {
-    expect(isInpaintCompositeEnabled()).toBe(false);
-    initFeatureFlags('?composite=1');
-    expect(isInpaintCompositeEnabled()).toBe(true);
-    expect(localStorage.getItem(COMPOSITE_FLAG_KEY)).toBe('1');
-  });
-
-  it('survives a reload without the query string, and ?composite=0 turns it back off', () => {
-    initFeatureFlags('?composite=1');
-    initFeatureFlags('');
-    expect(isInpaintCompositeEnabled()).toBe(true);
-    initFeatureFlags('?composite=0');
-    expect(isInpaintCompositeEnabled()).toBe(false);
-  });
-});
-
-describe('grain match flag', () => {
-  it('is off by default', () => {
-    expect(isGrainMatchEnabled()).toBe(false);
-  });
-
-  it('turns on with ?composite=1&grain=1 and persists', () => {
-    initFeatureFlags('?composite=1&grain=1');
-    expect(isGrainMatchEnabled()).toBe(true);
-    expect(localStorage.getItem(GRAIN_FLAG_KEY)).toBe('1');
-    initFeatureFlags('');
-    expect(isGrainMatchEnabled()).toBe(true);
-  });
-
-  it('has no effect unless compositing is on too (grain is applied to the composited patch)', () => {
-    initFeatureFlags('?grain=1');
-    expect(isGrainMatchEnabled()).toBe(false);
-    initFeatureFlags('?composite=1');
-    expect(isGrainMatchEnabled()).toBe(true);
-  });
-
-  it('can be turned off on its own, leaving compositing on', () => {
-    initFeatureFlags('?composite=1&grain=1');
-    initFeatureFlags('?grain=0');
-    expect(isGrainMatchEnabled()).toBe(false);
-    expect(isInpaintCompositeEnabled()).toBe(true);
-  });
-});
-
 describe('colour fit (default on)', () => {
   it('is on with nothing in the URL or storage — what every normal user gets', () => {
     expect(isColourFitEnabled()).toBe(true);
@@ -128,13 +83,6 @@ describe('colour fit (default on)', () => {
     expect(isColourFitEnabled()).toBe(true);
     initFeatureFlags('');
     expect(isColourFitEnabled()).toBe(true);
-  });
-
-  it('is independent of compositing (it is the no-compositing alternative, but can also be combined)', () => {
-    expect(isInpaintCompositeEnabled()).toBe(false);
-    initFeatureFlags('?composite=1');
-    expect(isColourFitEnabled()).toBe(true);
-    expect(isInpaintCompositeEnabled()).toBe(true);
   });
 });
 
@@ -170,8 +118,6 @@ describe('defaults before initFeatureFlags has run, or with no storage at all', 
     expect(fresh.isCleanFillEnabled()).toBe(true);
     expect(fresh.isColourFitEnabled()).toBe(true);
     expect(fresh.isMaskGrowEnabled()).toBe(false);
-    expect(fresh.isInpaintCompositeEnabled()).toBe(false);
-    expect(fresh.isGrainMatchEnabled()).toBe(false);
   });
 });
 
@@ -197,5 +143,16 @@ describe('mask grow flag', () => {
     initFeatureFlags('?cleanfill=0&maskgrow=1');
     expect(isCleanFillEnabled()).toBe(false);
     expect(isMaskGrowEnabled()).toBe(true);
+  });
+});
+
+describe('retired flags (compositing and grain matching were removed)', () => {
+  it('?composite=1&grain=1 switch nothing on and store nothing', () => {
+    initFeatureFlags('?composite=1&grain=1');
+    expect(localStorage.getItem('ih_flag_composite')).toBeNull();
+    expect(localStorage.getItem('ih_flag_grain')).toBeNull();
+    expect(isCleanFillEnabled()).toBe(true);
+    expect(isColourFitEnabled()).toBe(true);
+    expect(isMaskGrowEnabled()).toBe(false);
   });
 });

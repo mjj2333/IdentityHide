@@ -11,10 +11,9 @@ import {
   prewarmFluxModels,
 } from './comfyuiApi';
 import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID, CLEAN_SKIN_PROMPT } from './comfyuiWorkflows';
-import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled } from './featureFlags';
+import { isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled } from './featureFlags';
 import { growInpaintMask } from './inpaintMaskGrow';
 import { colourFitInpaint } from './inpaintColorFit';
-import { compositeInpaint } from './inpaintComposite';
 
 const MASK_ALPHA_THRESHOLD = 128;
 
@@ -315,19 +314,6 @@ async function runComfyUIInpaint(imageEntry, tierMP, signal, onStepProgress) {
       result = fitted;
     }
     colourFitInpaint({ generated: result, reference: uploadSrc, inpaintMask: uploadMaskCanvas });
-  }
-
-  // Opt-in (?composite=1): keep the ORIGINAL pixels outside a grown, feathered
-  // copy of the painted mask — see inpaintComposite.js. The composite is
-  // already at strippedCanvas dimensions, so the normalize step below is a
-  // no-op for it. Flag off = the behaviour below, untouched.
-  if (isInpaintCompositeEnabled()) {
-    const composited = compositeInpaint({
-      original: src, generated: result, inpaintMask: uploadMaskCanvas,
-      grainMatch: isGrainMatchEnabled(),
-    });
-    result.width = 0; result.height = 0;
-    result = composited;
   }
 
   // Free the downscaled upload canvas if we allocated one.

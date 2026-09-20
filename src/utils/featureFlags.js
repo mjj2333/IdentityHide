@@ -5,21 +5,17 @@
  * (the router strips the query string on first render, and an installed PWA
  * can't be given one at all after that).
  *
- *   Opt-in (off unless `?name=1`):      composite, grain, maskgrow
+ *   Opt-in (off unless `?name=1`):      maskgrow
  *   Default on (on unless `?name=0`):   cleanfill, colorfit
  *
  * Only a departure from the default is stored: an opt-in flag stores '1' and
  * `=0` forgets it; a default-on flag stores '0' and `=1` forgets it.
  */
 
-export const COMPOSITE_FLAG_KEY = 'ih_flag_composite';
-export const GRAIN_FLAG_KEY = 'ih_flag_grain';
 export const COLORFIT_FLAG_KEY = 'ih_flag_colorfit';
 export const CLEANFILL_FLAG_KEY = 'ih_flag_cleanfill';
 export const MASKGROW_FLAG_KEY = 'ih_flag_maskgrow';
 
-let inpaintComposite = false;
-let grainMatch = false;
 let colourFit = true;
 let cleanFill = true;
 let maskGrow = false;
@@ -46,38 +42,18 @@ export function resolveFlag(param, storageKey, search, storage, defaultOn = fals
 export function initFeatureFlags(search = globalThis.location?.search) {
   let storage = null;
   try { storage = globalThis.localStorage; } catch { /* unavailable */ }
-  inpaintComposite = !!storage && resolveFlag('composite', COMPOSITE_FLAG_KEY, search, storage);
-  grainMatch = !!storage && resolveFlag('grain', GRAIN_FLAG_KEY, search, storage);
   colourFit = resolveFlag('colorfit', COLORFIT_FLAG_KEY, search, storage, true);
   cleanFill = resolveFlag('cleanfill', CLEANFILL_FLAG_KEY, search, storage, true);
   maskGrow = !!storage && resolveFlag('maskgrow', MASKGROW_FLAG_KEY, search, storage);
 }
 
 /**
- * Tattoo removal keeps the ORIGINAL pixels outside a grown, feathered copy of
- * the painted mask instead of adopting the model's whole re-decoded frame
- * (see inpaintComposite.js). Off = the long-standing behaviour.
- */
-export function isInpaintCompositeEnabled() {
-  return inpaintComposite;
-}
-
-/**
- * Add matching photo grain to the composited patch (see grainMatch.js). Only
- * meaningful on top of compositing — without it there is no separate patch to
- * match — so ?grain=1 alone does nothing.
- */
-export function isGrainMatchEnabled() {
-  return inpaintComposite && grainMatch;
-}
-
-/**
  * DEFAULT ON (?colorfit=0 switches it off for that browser).
  * Undo the inpaint round trip's colour loss by fitting a colour transform on
  * the untouched pixels (see colorFit.js). Changes nothing else about the
- * result — no compositing — so removal behaves exactly as it always has.
- * Independent of the composite flag; with both on, the fill is colour-fitted
- * before it is composited.
+ * result, so removal behaves exactly as it always has. (Compositing the fill
+ * onto the original fixed colour perfectly but left Touch-Up remnants crisp
+ * and made removal less reliable; it was tried behind a flag and removed.)
  */
 export function isColourFitEnabled() {
   return colourFit;

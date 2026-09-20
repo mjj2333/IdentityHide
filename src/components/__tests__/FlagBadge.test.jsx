@@ -20,19 +20,7 @@ describe('FlagBadge', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('says so on screen when the composite flag is on, so an A/B tester knows which mode ran', () => {
-    initFeatureFlags('?composite=1');
-    render(<FlagBadge />);
-    expect(screen.getByText(/^composite on$/i)).toBeTruthy();
-  });
-
-  it('names both when grain matching is on as well', () => {
-    initFeatureFlags('?composite=1&grain=1');
-    render(<FlagBadge />);
-    expect(screen.getByText(/^composite \+ grain$/i)).toBeTruthy();
-  });
-
-  it('names mask grow', () => {
+  it('names mask grow, so an A/B tester knows which mode ran', () => {
     initFeatureFlags('?maskgrow=1');
     render(<FlagBadge />);
     expect(screen.getByText(/^maskgrow on$/i)).toBeTruthy();
@@ -49,13 +37,13 @@ describe('FlagBadge', () => {
   });
 
   it('names every departure from the defaults when several are combined', () => {
-    initFeatureFlags('?cleanfill=0&colorfit=0&maskgrow=1&composite=1&grain=1');
+    initFeatureFlags('?cleanfill=0&colorfit=0&maskgrow=1');
     render(<FlagBadge />);
-    expect(screen.getByText(/^cleanfill off \+ maskgrow \+ colorfit off \+ composite \+ grain$/i)).toBeTruthy();
+    expect(screen.getByText(/^cleanfill off \+ maskgrow \+ colorfit off$/i)).toBeTruthy();
   });
 
-  it('shows nothing when grain was requested without compositing (it has no effect there)', () => {
-    initFeatureFlags('?grain=1');
+  it('shows nothing for the retired composite / grain flags', () => {
+    initFeatureFlags('?composite=1&grain=1');
     const { container } = render(<FlagBadge />);
     expect(container.innerHTML).toBe('');
   });
