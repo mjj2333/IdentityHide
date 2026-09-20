@@ -174,3 +174,22 @@ export function findSampleTiles({ alpha, near, maskWidth, maskHeight, width, hei
   }
   return { ring, core };
 }
+
+// The fill counts as upscaled once it is stretched by more than this. Below
+// it, size differences are just the VAE's few-pixel rounding.
+const MIN_UPSCALE = 1.1;
+
+/**
+ * Was the generated fill stretched onto a larger working image?
+ *
+ * Grain matching exists for exactly that case (Original tier: a <= 2 MP fill on
+ * a full-resolution photo — smooth next to real sensor grain). When the fill
+ * was generated AT the working resolution (Quick / 1 MP) it must not run: a
+ * downscaled photo has had most of its grain averaged away, so what the
+ * high-pass measurement sees there is real fine detail (pores, hair, fabric),
+ * and "matching" it would mean sprinkling noise to imitate structure.
+ */
+export function fillWasUpscaled({ workingWidth, generatedWidth }) {
+  if (!(workingWidth > 0) || !(generatedWidth > 0)) return false;
+  return workingWidth / generatedWidth >= MIN_UPSCALE;
+}

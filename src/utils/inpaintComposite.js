@@ -1,5 +1,5 @@
 import { buildSoftMask } from './softMask';
-import { synthGrain, estimateGrainSigma, grainGain, addGrain, findSampleTiles } from './grainMatch';
+import { synthGrain, estimateGrainSigma, grainGain, addGrain, findSampleTiles, fillWasUpscaled } from './grainMatch';
 import { diagSpan } from './perfDiagnostics';
 
 /**
@@ -88,9 +88,14 @@ export function compositeInpaint({
   outCtx.drawImage(original, 0, 0);
   outCtx.drawImage(layer, 0, 0);
 
-  // Opt-in (?grain=1): give the patch the same fine grain as the photo around it.
+  // Opt-in (?grain=1): give the patch the same fine grain as the photo around
+  // it — only when the fill had to be upscaled (see fillWasUpscaled).
   if (grainMatch) {
-    applyGrainMatch({ out, original, soft, alpha, binary, mw, mh, growPx, featherPx });
+    if (fillWasUpscaled({ workingWidth: W, generatedWidth: generated.width })) {
+      applyGrainMatch({ out, original, soft, alpha, binary, mw, mh, growPx, featherPx });
+    } else {
+      diagSpan('grain-match')({ skipped: 'fill-not-upscaled' });
+    }
   }
 
   free(soft);

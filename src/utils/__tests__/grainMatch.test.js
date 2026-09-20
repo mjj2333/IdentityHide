@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { synthGrain, estimateGrainSigma, grainGain, grainWeight, addGrain, findSampleTiles } from '../grainMatch';
+import { synthGrain, estimateGrainSigma, grainGain, grainWeight, addGrain, findSampleTiles, fillWasUpscaled } from '../grainMatch';
 import { buildSoftMask } from '../softMask';
 
 // Deterministic gaussian noise for building test images.
@@ -185,5 +185,25 @@ describe('findSampleTiles', () => {
   it('returns nothing for an empty mask', () => {
     const empty = new Uint8ClampedArray(MW * MH);
     expect(findSampleTiles({ ...args, alpha: empty, near: empty })).toEqual({ ring: [], core: [] });
+  });
+});
+
+describe('fillWasUpscaled', () => {
+  it('is false when the fill was generated at the working resolution (Quick / 1 MP tier)', () => {
+    expect(fillWasUpscaled({ workingWidth: 1152, generatedWidth: 1152 })).toBe(false);
+  });
+
+  it('ignores the few-pixel size differences the VAE rounding produces', () => {
+    expect(fillWasUpscaled({ workingWidth: 1008, generatedWidth: 992 })).toBe(false);
+  });
+
+  it('is true when a 2 MP fill is stretched onto a larger photo (Original tier)', () => {
+    expect(fillWasUpscaled({ workingWidth: 2400, generatedWidth: 1632 })).toBe(true);   // ~1.47x
+    expect(fillWasUpscaled({ workingWidth: 4032, generatedWidth: 1632 })).toBe(true);   // ~2.47x
+  });
+
+  it('is false for unusable input', () => {
+    expect(fillWasUpscaled({ workingWidth: 0, generatedWidth: 0 })).toBe(false);
+    expect(fillWasUpscaled({ workingWidth: 1000, generatedWidth: undefined })).toBe(false);
   });
 });
