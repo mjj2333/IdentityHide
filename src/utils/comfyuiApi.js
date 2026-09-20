@@ -415,9 +415,14 @@ export async function downloadOutputImage(historyEntry, nodeId, { signal } = {})
  * ComfyUI caches loaded models in VRAM, so subsequent real jobs skip
  * the ~15-30s model-loading phase entirely.
  * Fire-and-forget — call once when user enters the mask editor.
+ *
+ * Pass the workflow options the real job will use (in practice the positive
+ * prompt): on the server a job whose prompt differs from the previous job's
+ * takes 80–130 s instead of ~23 s, and a prewarm with the matching prompt
+ * takes most of that hit (104 s → 43 s measured) while the user is painting.
  */
 let _prewarmed = false;
-export async function prewarmFluxModels() {
+export async function prewarmFluxModels(workflowOptions = {}) {
   if (_prewarmed) return;
   _prewarmed = true;
 
@@ -441,7 +446,7 @@ export async function prewarmFluxModels() {
     const maskName = await uploadMask(mask, 'prewarm_mask.png');
 
     // Same workflow structure but 1 step — just enough to force model loading
-    const workflow = buildTattooRemovalWorkflow(imgName, maskName, { steps: 1 });
+    const workflow = buildTattooRemovalWorkflow(imgName, maskName, { ...workflowOptions, steps: 1 });
 
     await queuePrompt(workflow);
     console.log('[ComfyUI] Prewarm job queued — models will be cached in VRAM');

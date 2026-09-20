@@ -9,11 +9,27 @@ const DEFAULT_DENOISE = 1;
 const DEFAULT_LORA_STRENGTH = 0.8;
 const SEED_MAX = 2 ** 53;
 
+// The long-standing positive prompt. Unchanged unless a caller opts out.
+const DEFAULT_POSITIVE_PROMPT = 'bare clean skin, natural human body, anatomically correct hands with five fingers, correct finger count, correct toe count, natural joint anatomy, seamless continuation of surrounding skin tone and texture, matching skin color and lighting, photorealistic, high detail, 8k';
+
+/**
+ * Skin-only positive prompt (?cleanfill=1). In Flux the positive prompt is a
+ * list of things to DRAW, and the negative prompt is inert at cfg 1 — so the
+ * anatomy wording above ("hands with five fingers… toe count… joints") makes
+ * the model draw line-art hands, fingers and figures on the skin once the
+ * original tattoo is covered (measured on a real photo; higher guidance made
+ * it a big clear hand). Naming only what should be there fixes that (arm photo,
+ * leftover ink covered: 3/3 clean skin), and hands do not need the wording: on
+ * a hand photo, same masks and seeds, fingers came out the same with either
+ * prompt. Keep guidance at 10.
+ */
+export const CLEAN_SKIN_PROMPT = 'clean bare skin, smooth natural skin texture, even skin tone, seamless continuation of the surrounding skin, matching skin color and lighting, photorealistic';
+
 /**
  * Build the Flux Fill tattoo removal workflow with ultrarealistic LoRA.
  * @param {string} imageName - Uploaded image filename (from ComfyUI upload)
  * @param {string} maskName - Uploaded mask filename
- * @param {object} options - { seed, steps, guidance, denoise, loraStrength }
+ * @param {object} options - { seed, steps, guidance, denoise, loraStrength, positivePrompt }
  */
 export function buildTattooRemovalWorkflow(imageName, maskName, options = {}) {
   const {
@@ -22,6 +38,7 @@ export function buildTattooRemovalWorkflow(imageName, maskName, options = {}) {
     guidance = DEFAULT_GUIDANCE,
     denoise = DEFAULT_DENOISE,
     loraStrength = DEFAULT_LORA_STRENGTH,
+    positivePrompt = DEFAULT_POSITIVE_PROMPT,
   } = options;
 
   return {
@@ -67,7 +84,7 @@ export function buildTattooRemovalWorkflow(imageName, maskName, options = {}) {
     "8": {
       "class_type": "CLIPTextEncode",
       "inputs": {
-        "text": "bare clean skin, natural human body, anatomically correct hands with five fingers, correct finger count, correct toe count, natural joint anatomy, seamless continuation of surrounding skin tone and texture, matching skin color and lighting, photorealistic, high detail, 8k",
+        "text": positivePrompt,
         "clip": ["6", 1],
       },
       "_meta": { "title": "Positive Prompt" },

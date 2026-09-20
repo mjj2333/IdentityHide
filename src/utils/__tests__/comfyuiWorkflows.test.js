@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from '../comfyuiWorkflows';
+import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID, CLEAN_SKIN_PROMPT } from '../comfyuiWorkflows';
 
 describe('buildTattooRemovalWorkflow', () => {
   it('returns a valid workflow object', () => {
@@ -59,5 +59,33 @@ describe('buildTattooRemovalWorkflow', () => {
     const wf = buildTattooRemovalWorkflow('img.png', 'mask.png', { loraStrength: 0.5 });
     expect(wf['6'].inputs.strength_model).toBe(0.5);
     expect(wf['6'].inputs.strength_clip).toBe(0.5);
+  });
+});
+
+describe('positive prompt option', () => {
+  it('keeps the long-standing prompt by default, word for word', () => {
+    const wf = buildTattooRemovalWorkflow('img.png', 'mask.png');
+    expect(wf['8'].inputs.text).toBe('bare clean skin, natural human body, anatomically correct hands with five fingers, correct finger count, correct toe count, natural joint anatomy, seamless continuation of surrounding skin tone and texture, matching skin color and lighting, photorealistic, high detail, 8k');
+  });
+
+  it('uses a caller-supplied positive prompt', () => {
+    const wf = buildTattooRemovalWorkflow('img.png', 'mask.png', { positivePrompt: 'only this' });
+    expect(wf['8'].inputs.text).toBe('only this');
+  });
+
+  it('leaves everything else about the workflow identical when only the prompt changes', () => {
+    const a = buildTattooRemovalWorkflow('img.png', 'mask.png', { seed: 1 });
+    const b = buildTattooRemovalWorkflow('img.png', 'mask.png', { seed: 1, positivePrompt: CLEAN_SKIN_PROMPT });
+    b['8'].inputs.text = a['8'].inputs.text;
+    expect(b).toEqual(a);
+  });
+});
+
+describe('CLEAN_SKIN_PROMPT', () => {
+  it('describes skin only — in Flux the positive prompt is a list of things to DRAW', () => {
+    expect(CLEAN_SKIN_PROMPT).toContain('skin');
+    for (const word of ['hand', 'finger', 'toe', 'joint', 'body', 'tattoo', 'ink']) {
+      expect(CLEAN_SKIN_PROMPT.toLowerCase()).not.toContain(word);
+    }
   });
 });

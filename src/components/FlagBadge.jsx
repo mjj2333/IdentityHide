@@ -1,4 +1,4 @@
-import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled } from '../utils/featureFlags';
+import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled } from '../utils/featureFlags';
 import '../styles/FlagBadge.css';
 
 /**
@@ -8,6 +8,8 @@ import '../styles/FlagBadge.css';
  */
 export default function FlagBadge() {
   const active = [
+    isCleanFillEnabled() && 'CLEANFILL',
+    isMaskGrowEnabled() && 'MASKGROW',
     isColourFitEnabled() && 'COLORFIT',
     isInpaintCompositeEnabled() && 'COMPOSITE',
     isGrainMatchEnabled() && 'GRAIN',

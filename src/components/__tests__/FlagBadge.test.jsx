@@ -38,6 +38,26 @@ describe('FlagBadge', () => {
     expect(screen.getByText(/^colorfit \+ composite \+ grain$/i)).toBeTruthy();
   });
 
+  it('names clean fill, alone and alongside colour fit', () => {
+    initFeatureFlags('?cleanfill=1');
+    const first = render(<FlagBadge />);
+    expect(screen.getByText(/^cleanfill on$/i)).toBeTruthy();
+    first.unmount();
+    initFeatureFlags('?cleanfill=1&colorfit=1');
+    render(<FlagBadge />);
+    expect(screen.getByText(/^cleanfill \+ colorfit$/i)).toBeTruthy();
+  });
+
+  it('names mask grow, after clean fill', () => {
+    initFeatureFlags('?maskgrow=1');
+    const first = render(<FlagBadge />);
+    expect(screen.getByText(/^maskgrow on$/i)).toBeTruthy();
+    first.unmount();
+    initFeatureFlags('?cleanfill=1&maskgrow=1');
+    render(<FlagBadge />);
+    expect(screen.getByText(/^cleanfill \+ maskgrow$/i)).toBeTruthy();
+  });
+
   it('shows nothing when grain was requested without compositing (it has no effect there)', () => {
     initFeatureFlags('?grain=1');
     const { container } = render(<FlagBadge />);

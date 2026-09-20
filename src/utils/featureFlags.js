@@ -9,10 +9,14 @@
 export const COMPOSITE_FLAG_KEY = 'ih_flag_composite';
 export const GRAIN_FLAG_KEY = 'ih_flag_grain';
 export const COLORFIT_FLAG_KEY = 'ih_flag_colorfit';
+export const CLEANFILL_FLAG_KEY = 'ih_flag_cleanfill';
+export const MASKGROW_FLAG_KEY = 'ih_flag_maskgrow';
 
 let inpaintComposite = false;
 let grainMatch = false;
 let colourFit = false;
+let cleanFill = false;
+let maskGrow = false;
 
 export function resolveFlag(param, storageKey, search, storage) {
   try {
@@ -32,6 +36,8 @@ export function initFeatureFlags(search = globalThis.location?.search) {
   inpaintComposite = !!storage && resolveFlag('composite', COMPOSITE_FLAG_KEY, search, storage);
   grainMatch = !!storage && resolveFlag('grain', GRAIN_FLAG_KEY, search, storage);
   colourFit = !!storage && resolveFlag('colorfit', COLORFIT_FLAG_KEY, search, storage);
+  cleanFill = !!storage && resolveFlag('cleanfill', CLEANFILL_FLAG_KEY, search, storage);
+  maskGrow = !!storage && resolveFlag('maskgrow', MASKGROW_FLAG_KEY, search, storage);
 }
 
 /**
@@ -61,4 +67,24 @@ export function isGrainMatchEnabled() {
  */
 export function isColourFitEnabled() {
   return colourFit;
+}
+
+/**
+ * Send a skin-only positive prompt (see comfyuiWorkflows.CLEAN_SKIN_PROMPT).
+ * This flag and the next are the only ones that change what the MODEL is asked
+ * to do; the others only change what is done with its answer.
+ */
+export function isCleanFillEnabled() {
+  return cleanFill;
+}
+
+/**
+ * Grow the painted mask before upload (see inpaintMaskGrow.js). Kept separate
+ * from the prompt because it is a trade-off, not a plain win: it stops the
+ * model continuing leftover ink on open skin (arm: redrawn 3/3 -> 0/3), but on a
+ * hand painted with the default brush it swallowed the fingers and a ring,
+ * which came back redrawn - worse than not growing at all.
+ */
+export function isMaskGrowEnabled() {
+  return maskGrow;
 }

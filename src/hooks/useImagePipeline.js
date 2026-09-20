@@ -4,13 +4,15 @@ import { extractMetadata } from '../utils/metadataExtractor';
 import { fileToCanvas, downscaleToMegapixels, capToMaxDimension } from '../utils/imageHelpers';
 import { getMaxWorkingDimension } from '../utils/platform';
 import { uploadImage, uploadMask, queueAndWait, downloadOutputImage, prewarmFluxModels } from '../utils/comfyuiApi';
-import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from '../utils/comfyuiWorkflows';
+import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID, CLEAN_SKIN_PROMPT } from '../utils/comfyuiWorkflows';
 import { useFaceDetection } from './useFaceDetection';
 import { applyMaskedBlur, drawRegionMask } from '../utils/blurEngine';
-import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled } from '../utils/featureFlags';
+import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled } from '../utils/featureFlags';
+import { growInpaintMask } from '../utils/inpaintMaskGrow';
 import { colourFitInpaint } from '../utils/inpaintColorFit';
 import { compositeInpaint } from '../utils/inpaintComposite';
 import { track } from '../utils/analytics';
+import { diagLog } from '../utils/perfDiagnostics';
 
 // Default working-resolution megapixel count. Callers (post-upload modal)
 // typically pass an explicit tierMP; this constant only applies to legacy
@@ -131,7 +133,7 @@ export function useImagePipeline() {
       });
 
       // Fire-and-forget: load Flux models into VRAM while user paints mask
-      prewarmFluxModels();
+      prewarmFluxModels(isCleanFillEnabled() ? { positivePrompt: CLEAN_SKIN_PROMPT } : {});
     } catch (err) {
       console.error('Pipeline error:', err);
       setError(err.message || 'Processing failed');
@@ -217,13 +219,24 @@ export function useImagePipeline() {
           maskToUpload = resized;
         }
 
+        // Opt-in (?maskgrow=1): cover the ink the brush missed — see
+        // inpaintMaskGrow.js. The grown mask is a new canvas (the user's painted
+        // mask is untouched) and is what every later step treats as "the
+        // repainted area". Opt-in (?cleanfill=1): ask only for skin — see
+        // CLEAN_SKIN_PROMPT. Both off = untouched.
+        const cleanFill = isCleanFillEnabled();
+        if (isMaskGrowEnabled()) {
+          maskToUpload = growInpaintMask(maskToUpload);
+          diagLog('maskgrow', { mask: `${maskToUpload.width}x${maskToUpload.height}` });
+        }
+
         if (onProgress) onProgress({ message: 'Uploading mask...', fraction: 0.1 });
         const maskName = await uploadMask(maskToUpload, 'redactid_mask.png', { signal });
         console.log(`[PIPELINE] Uploaded mask: ${maskName}`);
         checkAborted();
 
         if (onProgress) onProgress({ message: 'Starting tattoo removal...', fraction: 0.15 });
-        const workflow = buildTattooRemovalWorkflow(imageName, maskName);
+        const workflow = buildTattooRemovalWorkflow(imageName, maskName, cleanFill ? { positivePrompt: CLEAN_SKIN_PROMPT } : {});
 
         const history = await queueAndWait(workflow, {
           signal,

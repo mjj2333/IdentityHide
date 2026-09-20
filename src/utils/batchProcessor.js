@@ -10,8 +10,9 @@ import {
   downloadOutputImage,
   prewarmFluxModels,
 } from './comfyuiApi';
-import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID } from './comfyuiWorkflows';
-import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled } from './featureFlags';
+import { buildTattooRemovalWorkflow, TATTOO_ONLY_OUTPUT_NODE_ID, CLEAN_SKIN_PROMPT } from './comfyuiWorkflows';
+import { isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled } from './featureFlags';
+import { growInpaintMask } from './inpaintMaskGrow';
 import { colourFitInpaint } from './inpaintColorFit';
 import { compositeInpaint } from './inpaintComposite';
 
@@ -275,6 +276,11 @@ async function runComfyUIInpaint(imageEntry, tierMP, signal, onStepProgress) {
     uploadMaskCanvas = m;
   }
 
+  // Opt-in: ?maskgrow=1 grows the mask (inpaintMaskGrow.js), ?cleanfill=1 sends
+  // the skin-only prompt (CLEAN_SKIN_PROMPT). Both off = untouched.
+  const cleanFill = isCleanFillEnabled();
+  if (isMaskGrowEnabled()) uploadMaskCanvas = growInpaintMask(uploadMaskCanvas);
+
   onStepProgress(0, 'Uploading image');
   const imageName = await uploadImage(uploadSrc, `batch_${imageEntry.id}_img.png`, { signal });
 
@@ -282,7 +288,7 @@ async function runComfyUIInpaint(imageEntry, tierMP, signal, onStepProgress) {
   const maskName = await uploadMask(uploadMaskCanvas, `batch_${imageEntry.id}_mask.png`, { signal });
 
   onStepProgress(0.1, 'Starting inpaint');
-  const workflow = buildTattooRemovalWorkflow(imageName, maskName);
+  const workflow = buildTattooRemovalWorkflow(imageName, maskName, cleanFill ? { positivePrompt: CLEAN_SKIN_PROMPT } : {});
   const history = await queueAndWait(workflow, {
     signal,
     onProgress: (p) => {
@@ -368,7 +374,7 @@ export async function processBatchCombined(images, globalBlurSettings, globalFea
   const hasAnyTattoo = images.some(img => hasPaintedPixels(img.tattooMaskCanvas));
   if (hasAnyTattoo) {
     // Fire-and-forget — cached in VRAM for the first real job.
-    prewarmFluxModels().catch(() => {});
+    prewarmFluxModels(isCleanFillEnabled() ? { positivePrompt: CLEAN_SKIN_PROMPT } : {}).catch(() => {});
   }
 
   const results = [];

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { resolveFlag, initFeatureFlags, isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, COMPOSITE_FLAG_KEY, GRAIN_FLAG_KEY, COLORFIT_FLAG_KEY } from '../featureFlags';
+import { resolveFlag, initFeatureFlags, isInpaintCompositeEnabled, isGrainMatchEnabled, isColourFitEnabled, isCleanFillEnabled, isMaskGrowEnabled, COMPOSITE_FLAG_KEY, GRAIN_FLAG_KEY, COLORFIT_FLAG_KEY, CLEANFILL_FLAG_KEY, MASKGROW_FLAG_KEY } from '../featureFlags';
 
 beforeEach(() => {
   localStorage.clear();
@@ -104,5 +104,53 @@ describe('colour fit flag', () => {
     initFeatureFlags('?composite=1');
     expect(isColourFitEnabled()).toBe(true);
     expect(isInpaintCompositeEnabled()).toBe(true);
+  });
+});
+
+describe('clean fill flag', () => {
+  it('is off by default', () => {
+    expect(isCleanFillEnabled()).toBe(false);
+  });
+
+  it('turns on with ?cleanfill=1, persists, and turns off with ?cleanfill=0', () => {
+    initFeatureFlags('?cleanfill=1');
+    expect(isCleanFillEnabled()).toBe(true);
+    expect(localStorage.getItem(CLEANFILL_FLAG_KEY)).toBe('1');
+    initFeatureFlags('');
+    expect(isCleanFillEnabled()).toBe(true);
+    initFeatureFlags('?cleanfill=0');
+    expect(isCleanFillEnabled()).toBe(false);
+  });
+
+  it('is independent of the other flags', () => {
+    initFeatureFlags('?cleanfill=1&colorfit=1');
+    expect(isCleanFillEnabled()).toBe(true);
+    expect(isColourFitEnabled()).toBe(true);
+    expect(isInpaintCompositeEnabled()).toBe(false);
+  });
+});
+
+describe('mask grow flag', () => {
+  it('is off by default', () => {
+    expect(isMaskGrowEnabled()).toBe(false);
+  });
+
+  it('turns on with ?maskgrow=1, persists, and turns off with ?maskgrow=0', () => {
+    initFeatureFlags('?maskgrow=1');
+    expect(isMaskGrowEnabled()).toBe(true);
+    expect(localStorage.getItem(MASKGROW_FLAG_KEY)).toBe('1');
+    initFeatureFlags('');
+    expect(isMaskGrowEnabled()).toBe(true);
+    initFeatureFlags('?maskgrow=0');
+    expect(isMaskGrowEnabled()).toBe(false);
+  });
+
+  it('is separate from clean fill — the prompt can be tried without growing the mask, and the reverse', () => {
+    initFeatureFlags('?cleanfill=1&maskgrow=0');
+    expect(isCleanFillEnabled()).toBe(true);
+    expect(isMaskGrowEnabled()).toBe(false);
+    initFeatureFlags('?cleanfill=0&maskgrow=1');
+    expect(isCleanFillEnabled()).toBe(false);
+    expect(isMaskGrowEnabled()).toBe(true);
   });
 });
