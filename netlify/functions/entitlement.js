@@ -1,7 +1,9 @@
 // Returns whether the caller is premium. Supports two credentials:
 //
 //   GET ?email=foo@bar.com  → checks `subscriptions` + `beta_redemptions`
-//                             (Stripe subscribers and admin manual grants)
+//                             (Stripe subscribers and admin manual grants);
+//                             if neither grants access, asks Stripe directly
+//                             and repairs the `subscriptions` row from it
 //   GET ?code=REDACT-XXXX   → checks `beta_codes` directly (self-service
 //                             beta code redemption — no row per user)
 //
@@ -9,18 +11,11 @@
 // Privacy note: we don't leak whether an email/code is known vs unknown —
 // all failure modes return `{ premium: false, expiresAt: null, source: null }`.
 import { createHash } from 'node:crypto';
-import { createClient } from '@supabase/supabase-js';
+import { getStripe, getSupabase } from './_clients.js';
+import { reconcileFromStripe } from './_subscriptionSync.js';
 import { rateLimit, checkOrigin } from './rateLimit.js';
 import { withSentry } from './_sentry.js';
 import { withCors } from './_cors.js';
-
-let supabase;
-function getSupabase() {
-  if (!supabase) {
-    supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  }
-  return supabase;
-}
 
 function emailKey(email) {
   return String(email || '').trim().toLowerCase();
@@ -100,10 +95,22 @@ async function lookupByEmail(email) {
 
   // Stripe side: active if status is active/trialing/canceled AND the period
   // hasn't expired. Canceled + future period_end = cancel-at-period-end.
-  const subStatus = subRow?.status;
+  const isActive = (row) => {
+    const status = row?.status;
+    const expires = row?.current_period_end || null;
+    return (status === 'active' || status === 'trialing' || status === 'canceled') && !!expires && expires > now;
+  };
+  // The row is only a cache of Stripe. If it doesn't grant access, ask
+  // Stripe itself before saying no: the row may be missing (Delete account,
+  // or a checkout from before the webhook existed) or stuck on a dead
+  // subscription while a newer one is live. Reconcile writes the repaired
+  // row; on any failure it returns null and we keep the DB answer.
+  if (!isActive(subRow) && process.env.STRIPE_SECRET_KEY) {
+    const repaired = await reconcileFromStripe({ stripe: getStripe(), supabase: getSupabase(), email, now });
+    if (repaired) subRow = repaired;
+  }
   const subExpires = subRow?.current_period_end || null;
-  const subActive = (subStatus === 'active' || subStatus === 'trialing' || subStatus === 'canceled')
-    && subExpires && subExpires > now;
+  const subActive = isActive(subRow);
 
   // Beta side: active if a redemption row exists and its expiry is either
   // null (indefinite) or in the future. Redemptions table is keyed by email.

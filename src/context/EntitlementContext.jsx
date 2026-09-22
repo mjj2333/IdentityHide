@@ -203,9 +203,11 @@ export function EntitlementProvider({ children }) {
   }, []);
 
   // Permanent account deletion. Required by Play/App Store policy. Hits the
-  // server to cancel any Stripe subscription + delete server-side rows, then
-  // clears local credentials via signOut(). Throws on network/server error
-  // so the UI can leave the user signed in and surface the failure.
+  // server to cancel every Stripe subscription for the email + delete
+  // server-side rows, then clears local credentials via signOut(). Throws on
+  // network/server error so the UI can leave the user signed in and surface
+  // the failure. Resolves to the server's { ok, cancelled, failed } so the
+  // UI can say when a subscription could NOT be cancelled.
   const deleteAccount = useCallback(async () => {
     const targetEmail = email || null;
     const targetCode = betaCode || null;
@@ -219,7 +221,9 @@ export function EntitlementProvider({ children }) {
     if (!res.ok) {
       throw new Error(`Account deletion failed (${res.status})`);
     }
+    const result = await res.json().catch(() => ({ ok: true, cancelled: [], failed: [] }));
     signOut();
+    return result;
   }, [email, betaCode, signOut]);
 
   // Apple 3.1.1: promo ("beta") codes are a non-IAP unlock and are not

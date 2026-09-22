@@ -1,24 +1,19 @@
 // Creates a Stripe Billing Portal session for a known email. Client hits
 // this from the AccountScreen "Manage subscription" button; we return a
-// Stripe URL and the browser redirects there.
+// Stripe URL and the browser redirects there. With `flow: 'cancel'` the
+// session opens straight on Stripe's cancel confirmation for the row's
+// subscription (the portal allows cancellation, but hides the link under
+// the plan's details where people don't find it).
 //
 // Trust model: this endpoint creates a portal session for any email it
 // finds in the subscriptions table. Matches the client-trusted paywall
 // design — a user who knows someone else's email can open that person's
 // portal. Acceptable for MVP; revisit if fraud becomes a concern.
-import Stripe from 'stripe';
-import { createClient } from '@supabase/supabase-js';
+import { getStripe, getSupabase } from './_clients.js';
+import { reconcileFromStripe } from './_subscriptionSync.js';
 import { rateLimit, checkOrigin } from './rateLimit.js';
 import { withSentry, captureException } from './_sentry.js';
 import { withCors } from './_cors.js';
-
-let supabase;
-function getSupabase() {
-  if (!supabase) {
-    supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  }
-  return supabase;
-}
 
 function emailKey(email) {
   return String(email || '').trim().toLowerCase();
@@ -58,7 +53,7 @@ async function customerPortalHandler(event) {
   try {
     const { data, error } = await getSupabase()
       .from('subscriptions')
-      .select('customer_id')
+      .select('customer_id, subscription_id')
       .eq('email', email)
       .maybeSingle();
     if (error) throw error;
@@ -67,17 +62,25 @@ async function customerPortalHandler(event) {
     console.error('[customer-portal] db read failed:', err.message);
     return { statusCode: 500, body: 'Could not look up account' };
   }
+  // No row (or a row with no customer)? The row is only a cache — check
+  // Stripe before turning a paying customer away.
+  if (!row?.customer_id) {
+    row = await reconcileFromStripe({ stripe: getStripe(), supabase: getSupabase(), email });
+  }
   if (!row?.customer_id) {
     return { statusCode: 404, body: 'No subscription found for this email' };
   }
 
   const reqOrigin = event.headers['origin'] || event.headers['referer']?.replace(/\/$/, '') || '';
+  const params = {
+    customer: row.customer_id,
+    return_url: `${reqOrigin}/account`,
+  };
+  if (body.flow === 'cancel' && row.subscription_id) {
+    params.flow_data = { type: 'subscription_cancel', subscription_cancel: { subscription: row.subscription_id } };
+  }
   try {
-    const stripe = new Stripe(secret);
-    const session = await stripe.billingPortal.sessions.create({
-      customer: row.customer_id,
-      return_url: `${reqOrigin}/account`,
-    });
+    const session = await getStripe().billingPortal.sessions.create(params);
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },

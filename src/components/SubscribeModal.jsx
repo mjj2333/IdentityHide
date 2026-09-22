@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { openCheckout } from '../utils/stripe';
+import { useEntitlement } from '../context/EntitlementContext';
 import { track } from '../utils/analytics';
 import { isNativeApp } from '../utils/platform';
 
@@ -36,6 +37,9 @@ export default function SubscribeModal({ onClose, source = 'unknown' }) {
   const [plan, setPlan] = useState('annual');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  // Sent along so the server can stop a second purchase on the same email
+  // (each checkout would otherwise start a brand-new Stripe subscription).
+  const { email } = useEntitlement();
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useFocusTrap(modalRef);
@@ -57,10 +61,12 @@ export default function SubscribeModal({ onClose, source = 'unknown' }) {
     try {
       // Redirects the browser to Stripe Checkout on success; only returns
       // control here on failure.
-      await openCheckout(plan);
+      await openCheckout(plan, { email });
     } catch (err) {
       console.warn('[Subscribe] checkout failed:', err.message);
-      setError('Could not open checkout. Please try again in a moment.');
+      setError(err.code === 'already_subscribed'
+        ? `${email} already has an active subscription. Use "Re-check status" on the Account screen, or Manage subscription to review it.`
+        : 'Could not open checkout. Please try again in a moment.');
       setBusy(false);
     }
   };

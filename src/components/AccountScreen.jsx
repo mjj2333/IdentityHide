@@ -33,12 +33,12 @@ export default function AccountScreen({ onBack }) {
   // payment path. Promo redemption and sign-in stay available everywhere.
   const canPurchase = !isNativeApp();
 
-  const handlePortal = async () => {
+  const handlePortal = async (flow) => {
     if (busy || !email) return;
     setBusy(true);
     setError(null);
     try {
-      await openPortal(email);
+      await openPortal(email, flow ? { flow } : {});
     } catch (err) {
       setError(err.message || 'Could not open billing portal.');
       setBusy(false);
@@ -55,10 +55,13 @@ export default function AccountScreen({ onBack }) {
     setDeleting(true);
     setError(null);
     try {
-      await deleteAccount();
+      const result = await deleteAccount();
       // signOut runs inside deleteAccount on success. Close the modal and
       // let the screen re-render in its no-credential state.
       setShowDeleteConfirm(false);
+      if (result?.failed?.length) {
+        setError('Your account was deleted, but your subscription could not be cancelled. Please contact support so we can cancel it for you.');
+      }
     } catch (err) {
       setError(err.message || 'Could not delete account. Please try again or contact support.');
     } finally {
@@ -159,13 +162,24 @@ export default function AccountScreen({ onBack }) {
                   // Billing portal is a Stripe (non-store) payment surface, so
                   // like the subscribe button it never renders in the native
                   // shells. Web-subscribed users manage billing on the web.
-                  <button
-                    className="btn btn-primary btn-lg"
-                    onClick={handlePortal}
-                    disabled={busy}
-                  >
-                    Manage subscription
-                  </button>
+                  <>
+                    <button
+                      className="btn btn-primary btn-lg"
+                      onClick={() => handlePortal()}
+                      disabled={busy}
+                    >
+                      Manage subscription
+                    </button>
+                    {/* Same portal, opened on Stripe's cancel confirmation —
+                        the portal home hides that link under the plan. */}
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => handlePortal('cancel')}
+                      disabled={busy}
+                    >
+                      Cancel subscription
+                    </button>
+                  </>
                 ) : (
                   // Code-granted access has no Stripe Customer to manage. We
                   // deliberately don't promote a paid upgrade path here — the
@@ -249,7 +263,7 @@ export default function AccountScreen({ onBack }) {
           <ConfirmModal
             message={
               email
-                ? 'Permanently delete your account? Your subscription (if any) will be cancelled and your data on our servers will be removed. This cannot be undone.'
+                ? 'Permanently delete your account? Any subscription on this email is cancelled immediately (the rest of the billing period is not refunded) and your data on our servers is removed. This cannot be undone.'
                 : 'Permanently delete your account? Your promo code will be removed from this device. This cannot be undone.'
             }
             confirmLabel={deleting ? 'Deleting…' : 'Delete account'}

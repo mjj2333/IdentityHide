@@ -62,7 +62,7 @@ export default defineConfig({
     // Unit/component specs live under src/**/__tests__/. Playwright specs in
     // e2e/ would otherwise be discovered by vitest and crash on the missing
     // `@playwright/test` runtime — exclude them explicitly.
-    include: ['src/**/*.{test,spec}.{js,jsx}'],
+    include: ['src/**/*.{test,spec}.{js,jsx}', 'netlify/functions/__tests__/*.{test,spec}.js'],
     exclude: ['node_modules', 'dist', 'e2e'],
   },
 })

@@ -1,7 +1,12 @@
 // Creates a Stripe Checkout Session (subscription mode) and returns the URL
-// for the client to redirect to. The client reads the body as JSON with
-// { priceKey: 'monthly' | 'annual' } and then navigates to the returned url.
-import Stripe from 'stripe';
+// for the client to redirect to. The client sends JSON with
+// { priceKey: 'monthly' | 'annual', email?: string } and navigates to the
+// returned url. When the app already knows the email, we first ask Stripe:
+// a live subscription → 409 `already_subscribed` (no second charge); an
+// old customer with nothing live → reuse that Customer, so a person keeps
+// ONE Stripe customer across purchases instead of one per checkout.
+import { getStripe } from './_clients.js';
+import { listStripeSubscriptions, pickEntitlingSubscription } from './_subscriptionSync.js';
 import { rateLimit, checkOrigin } from './rateLimit.js';
 import { withSentry, captureException } from './_sentry.js';
 import { withCors } from './_cors.js';
@@ -55,18 +60,41 @@ async function stripeCheckoutHandler(event) {
   const successUrl = `${reqOrigin}/success?session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${reqOrigin}/`;
 
-  try {
-    const stripe = new Stripe(secret);
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      line_items: [{ price: priceId, quantity: 1 }],
-      // Stripe Checkout collects email natively for subscription mode and
-      // uses it as the Customer email. We don't need to pass it ourselves.
-      success_url: successUrl,
+  const params = {
+    mode: 'subscription',
+    line_items: [{ price: priceId, quantity: 1 }],
+    // Without a known email, Stripe Checkout collects it natively and
+    // creates the Customer itself.
+    success_url: successUrl,
       cancel_url: cancelUrl,
-      allow_promotion_codes: true,
-      billing_address_collection: 'auto',
-    });
+    allow_promotion_codes: true,
+    billing_address_collection: 'auto',
+  };
+
+  const email = String(body.email || '').trim().toLowerCase();
+  if (email && email.length <= 254) {
+    try {
+      const subs = await listStripeSubscriptions(getStripe(), email);
+      if (pickEntitlingSubscription(subs)) {
+        return {
+          statusCode: 409,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ error: 'already_subscribed' }),
+        };
+      }
+      // Newest existing customer, if any; otherwise just prefill the email.
+      const existing = subs.length ? subs[subs.length - 1].customer : null;
+      if (existing) params.customer = existing;
+      else params.customer_email = email;
+    } catch (err) {
+      // The lookup is a nicety; an outage there must not block a sale.
+      captureException(err, { context: 'stripe-checkout.lookup' });
+      console.warn('[stripe-checkout] Stripe lookup failed, continuing:', err.message);
+    }
+  }
+
+  try {
+    const session = await getStripe().checkout.sessions.create(params);
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },

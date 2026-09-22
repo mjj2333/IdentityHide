@@ -14,14 +14,23 @@ const SESSION_ENDPOINT = apiUrl('/.netlify/functions/entitlement-from-session');
 /**
  * Start a Stripe Checkout session and redirect the browser to it.
  * `priceKey` is 'monthly' or 'annual' — resolved to a Price ID on the server.
+ * Pass the signed-in `email` when known: the server then refuses a second
+ * purchase for an email that already has a live subscription (the error
+ * carries `code: 'already_subscribed'`) and reuses that person's existing
+ * Stripe customer instead of creating one per checkout.
  */
-export async function openCheckout(priceKey) {
+export async function openCheckout(priceKey, { email } = {}) {
   track('stripe_checkout_opened', { priceKey });
   const res = await fetch(CHECKOUT_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ priceKey }),
+    body: JSON.stringify(email ? { priceKey, email } : { priceKey }),
   });
+  if (res.status === 409) {
+    const err = new Error('This email already has an active subscription');
+    err.code = 'already_subscribed';
+    throw err;
+  }
   if (!res.ok) {
     throw new Error(`Checkout unavailable (${res.status})`);
   }
@@ -31,14 +40,15 @@ export async function openCheckout(priceKey) {
 
 /**
  * Open the Stripe Billing Portal for a subscribed email. Redirects the
- * browser on success. Throws if the email doesn't have an active
- * subscription row.
+ * browser on success. Throws if the email doesn't have a subscription.
+ * `flow: 'cancel'` lands straight on Stripe's cancel confirmation instead
+ * of the portal home (where the cancel link is buried under the plan).
  */
-export async function openPortal(email) {
+export async function openPortal(email, { flow } = {}) {
   const res = await fetch(PORTAL_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify(flow ? { email, flow } : { email }),
   });
   if (!res.ok) {
     throw new Error(`Portal unavailable (${res.status})`);

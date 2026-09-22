@@ -3,9 +3,11 @@
 // must also offer in-app account deletion. The user calls this from
 // AccountScreen with their email and/or beta code; the function:
 //
-//   1. If email present: cancels any active Stripe subscription, deletes
-//      the `subscriptions` row, deletes any `beta_redemptions` row keyed
-//      by that email (admin-granted access).
+//   1. If email present: cancels EVERY subscription Stripe is still running
+//      for that email (across all its Stripe customers — a repeat checkout
+//      makes a new one each time, and the row only ever knew the latest),
+//      deletes the `subscriptions` row, deletes any `beta_redemptions` row
+//      keyed by that email (admin-granted access).
 //
 //   2. If only a beta code is present: nothing to delete server-side. Beta
 //      codes are shared credentials (the same code can be used on multiple
@@ -17,27 +19,11 @@
 // the rest. We always return 200 to the client when input is well-formed,
 // because a partially-deleted user is still better than a stranded one.
 // Real errors land in Sentry for forensics.
-import Stripe from 'stripe';
-import { createClient } from '@supabase/supabase-js';
+import { getStripe, getSupabase } from './_clients.js';
+import { cancelAllSubscriptions } from './_subscriptionSync.js';
 import { rateLimit, checkOrigin } from './rateLimit.js';
 import { withSentry, captureException } from './_sentry.js';
 import { withCors } from './_cors.js';
-
-let supabase;
-function getSupabase() {
-  if (!supabase) {
-    supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  }
-  return supabase;
-}
-
-let stripe;
-function getStripe() {
-  if (!stripe) {
-    stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-  }
-  return stripe;
-}
 
 async function deleteAccountHandler(event) {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, body: '' };
@@ -69,31 +55,24 @@ async function deleteAccountHandler(event) {
   }
 
   const sb = getSupabase();
+  let cancelled = [];
+  let failed = [];
 
   // Email path: full server-side cleanup.
   if (email) {
-    // 1. Cancel any active Stripe subscription. We look up the row first to
-    // get the subscription_id rather than hitting Stripe blind, since most
-    // accounts (beta-only or admin-granted) won't have one.
-    let sub = null;
-    try {
-      const { data } = await sb
-        .from('subscriptions')
-        .select('subscription_id, status')
-        .eq('email', email)
-        .maybeSingle();
-      sub = data;
-    } catch (err) {
-      captureException(err, { scope: 'delete_account.subscription_lookup' });
-    }
-    if (sub?.subscription_id && sub.status === 'active' && process.env.STRIPE_SECRET_KEY) {
+    // 1. Cancel, immediately, everything Stripe is still running for this
+    // email. Asks Stripe rather than trusting the row: the row can be
+    // missing or point at one of several subscriptions.
+    if (process.env.STRIPE_SECRET_KEY) {
       try {
-        await getStripe().subscriptions.cancel(sub.subscription_id);
+        ({ cancelled, failed } = await cancelAllSubscriptions(getStripe(), email));
+        for (const f of failed) {
+          console.warn('[delete-account] Stripe cancel failed:', f.id, f.error);
+          captureException(new Error(f.error), { scope: 'delete_account.stripe_cancel', subscription: f.id });
+        }
       } catch (err) {
-        // Stripe may 404 if the sub was already cancelled or refunded by
-        // support. That's a fine-by-us state; the row gets deleted next.
-        console.warn('[delete-account] Stripe cancel skipped:', err.message);
-        captureException(err, { scope: 'delete_account.stripe_cancel' });
+        // Couldn't even list — report it and carry on with the rest.
+        captureException(err, { scope: 'delete_account.stripe_list' });
       }
     }
 
@@ -128,10 +107,12 @@ async function deleteAccountHandler(event) {
   // from localStorage; the underlying beta_codes row stays usable for
   // anyone else who has the code.
 
+  // `failed` lets the client tell the user their subscription is NOT gone
+  // rather than promising it is.
   return {
     statusCode: 200,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ok: true }),
+    body: JSON.stringify({ ok: true, cancelled, failed: failed.map((f) => f.id) }),
   };
 }
 
