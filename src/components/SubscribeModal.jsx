@@ -37,9 +37,13 @@ export default function SubscribeModal({ onClose, source = 'unknown' }) {
   const [plan, setPlan] = useState('annual');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  // Sent along so the server can stop a second purchase on the same email
-  // (each checkout would otherwise start a brand-new Stripe subscription).
-  const { email } = useEntitlement();
+  // The email goes to the server BEFORE Stripe so it can refuse a second
+  // purchase for an email that already subscribes (each checkout would
+  // otherwise start a brand-new Stripe customer + subscription — a signed-out
+  // subscriber re-buying is exactly how the duplicates happened) and lock
+  // that email on the Checkout page. Signed out, we ask for it here.
+  const { email: knownEmail, signIn } = useEntitlement();
+  const [typedEmail, setTypedEmail] = useState('');
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useFocusTrap(modalRef);
@@ -56,6 +60,11 @@ export default function SubscribeModal({ onClose, source = 'unknown' }) {
 
   const handleSubscribe = async () => {
     if (busy) return;
+    const email = (knownEmail || typedEmail).trim().toLowerCase();
+    if (!knownEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -64,9 +73,22 @@ export default function SubscribeModal({ onClose, source = 'unknown' }) {
       await openCheckout(plan, { email });
     } catch (err) {
       console.warn('[Subscribe] checkout failed:', err.message);
-      setError(err.code === 'already_subscribed'
-        ? `${email} already has an active subscription. Use "Re-check status" on the Account screen, or Manage subscription to review it.`
-        : 'Could not open checkout. Please try again in a moment.');
+      if (err.code === 'already_subscribed') {
+        // They already pay for this. Signed out: sign them in with that
+        // email instead of taking their money again. Signed in: the row is
+        // stale — Re-check status on the Account screen repairs it.
+        if (!knownEmail) {
+          try {
+            const { premium } = await signIn(email);
+            if (premium) { onCloseRef.current?.(); return; }
+          } catch (signInErr) {
+            console.warn('[Subscribe] sign-in after 409 failed:', signInErr.message);
+          }
+        }
+        setError(`${email} already has an active subscription. Use "Re-check status" on the Account screen, or Manage subscription to review it.`);
+      } else {
+        setError('Could not open checkout. Please try again in a moment.');
+      }
       setBusy(false);
     }
   };
@@ -121,6 +143,22 @@ export default function SubscribeModal({ onClose, source = 'unknown' }) {
             );
           })}
         </div>
+
+        {!knownEmail && (
+          <label className="subscribe-email">
+            <span className="subscribe-email-label">Email for your subscription</span>
+            <input
+              type="email"
+              className="signin-input"
+              placeholder="you@example.com"
+              value={typedEmail}
+              onChange={(e) => setTypedEmail(e.target.value)}
+              autoComplete="email"
+              disabled={busy}
+              required
+            />
+          </label>
+        )}
 
         <div className="subscribe-actions">
           <button

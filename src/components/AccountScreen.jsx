@@ -179,6 +179,9 @@ export default function AccountScreen({ onBack }) {
                     >
                       Cancel subscription
                     </button>
+                    <p className="account-hint">
+                      Stops future payments. You keep Premium until {expiryText || 'the end of the paid period'}, and your account stays.
+                    </p>
                   </>
                 ) : (
                   // Code-granted access has no Stripe Customer to manage. We
@@ -232,6 +235,15 @@ export default function AccountScreen({ onBack }) {
               >
                 Delete account
               </button>
+              {/* Kept separate from cancelling: store policy (Play, Apple
+                  5.1.1(v)) requires a way to erase the server-side record. */}
+              {email && (
+                <p className="account-hint">
+                  {premium && source === 'stripe'
+                    ? 'Removes your email and data from our servers and cancels your subscription immediately, with no refund for the rest of the paid period. To keep Premium until then, cancel the subscription instead.'
+                    : 'Removes your email and data from our servers.'}
+                </p>
+              )}
             </div>
           </section>
         )}
@@ -263,7 +275,7 @@ export default function AccountScreen({ onBack }) {
           <ConfirmModal
             message={
               email
-                ? 'Permanently delete your account? Any subscription on this email is cancelled immediately (the rest of the billing period is not refunded) and your data on our servers is removed. This cannot be undone.'
+                ? `Permanently delete your account? Any subscription on this email is cancelled immediately${premium && source === 'stripe' && expiryText ? ` — you lose the Premium you have paid for until ${expiryText}, with no refund` : ' (the rest of the billing period is not refunded)'}, and your data on our servers is removed. This cannot be undone. To keep Premium until then, cancel the subscription instead.`
                 : 'Permanently delete your account? Your promo code will be removed from this device. This cannot be undone.'
             }
             confirmLabel={deleting ? 'Deleting…' : 'Delete account'}

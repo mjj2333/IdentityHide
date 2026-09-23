@@ -821,6 +821,20 @@ textarea:focus-visible,
   width: 100%;
 }
 
+/* Email field shown when the subscriber is signed out — the email has to be
+   known BEFORE Checkout so a second purchase on it can be refused. */
+.subscribe-email {
+  display: block;
+  margin: 12px 0 4px;
+  text-align: left;
+}
+
+.subscribe-email-label {
+  display: block;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
 .subscribe-fineprint {
   margin: 10px 0 0;
   font-size: 11.5px;
@@ -1178,6 +1192,16 @@ textarea:focus-visible,
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* One-line explanation under Cancel subscription / Delete account, so the
+   difference between them is on screen, not guessed. */
+.account-hint {
+  margin: -2px 0 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  text-align: center;
 }
 
 /* Delete-account button: visually de-emphasized vs. Sign out (it's the

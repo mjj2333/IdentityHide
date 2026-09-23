@@ -14,9 +14,12 @@ vi.mock('../SubscribeModal', () => ({ default: () => null }));
 import AccountScreen from '../AccountScreen';
 import { openPortal } from '../../utils/stripe';
 
+const RENEWAL = Date.UTC(2026, 9, 20, 12);          // 20 October 2026
+const renewalText = new Date(RENEWAL).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+
 beforeEach(() => {
   Object.assign(ent, {
-    email: 'a@b.c', betaCode: null, premium: true, expiresAt: Date.now() + 86_400_000, source: 'stripe', loading: false,
+    email: 'a@b.c', betaCode: null, premium: true, expiresAt: RENEWAL, source: 'stripe', loading: false,
     signOut: vi.fn(), deleteAccount: vi.fn(async () => ({ ok: true, cancelled: ['sub_1'], failed: [] })), refreshEntitlement: vi.fn(),
   });
   openPortal.mockClear();
@@ -31,10 +34,25 @@ describe('AccountScreen — Stripe subscriber', () => {
     expect(screen.getByRole('button', { name: /manage subscription/i })).toBeTruthy();
   });
 
-  it('warns in the delete confirmation that cancellation is immediate', () => {
+  it('spells out the difference: cancelling keeps Premium until the renewal date and keeps the account', () => {
+    render(<AccountScreen onBack={() => {}} />);
+    const hint = screen.getByText(/stops future payments/i);
+    expect(hint.textContent).toContain(renewalText);
+    expect(hint.textContent).toMatch(/account stays/i);
+  });
+
+  it('spells out that deleting is immediate, unrefunded, and points to cancelling instead', () => {
+    render(<AccountScreen onBack={() => {}} />);
+    const hint = screen.getByText(/removes your email and data/i);
+    expect(hint.textContent).toMatch(/immediately/i);
+    expect(hint.textContent).toMatch(/cancel the subscription instead/i);
+  });
+
+  it('repeats the warning, with the date, in the delete confirmation', () => {
     render(<AccountScreen onBack={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: /delete account/i }));
-    expect(screen.getByText(/cancelled immediately/i)).toBeTruthy();
+    const msg = screen.getByText(/cancelled immediately/i);
+    expect(msg.textContent).toContain(renewalText);
   });
 
   it('tells the user when a subscription could NOT be cancelled during deletion', async () => {
@@ -47,9 +65,12 @@ describe('AccountScreen — Stripe subscriber', () => {
 });
 
 describe('AccountScreen — promo-code user', () => {
-  it('shows no cancel button (nothing to cancel in Stripe)', () => {
+  it('shows no cancel button and no subscription wording (nothing to cancel in Stripe)', () => {
     Object.assign(ent, { email: null, betaCode: 'REDACT-XYZ', source: 'beta' });
     render(<AccountScreen onBack={() => {}} />);
     expect(screen.queryByRole('button', { name: /cancel subscription/i })).toBeNull();
+    expect(screen.queryByText(/stops future payments/i)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /delete account/i }));
+    expect(screen.getByText(/promo code will be removed/i)).toBeTruthy();
   });
 });
