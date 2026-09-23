@@ -34,6 +34,7 @@ function makeStripe({ customers = [], subscriptions = [] } = {}) {
     },
     checkout: { sessions: { create: async (params) => { calls.checkoutCreate.push(params); return { url: 'https://checkout.stripe.test/s' }; } } },
     billingPortal: { sessions: { create: async (params) => { calls.portalCreate.push(params); return { url: 'https://billing.stripe.test/p' }; } } },
+    prices: { retrieve: async (id) => ({ id, product: ['price_month', 'price_year'].includes(id) ? 'prod_ours' : 'prod_theirs' }) },
   };
 }
 
@@ -65,7 +66,7 @@ function makeDb({ subscriptions = [], beta_redemptions = [], feedback = [] } = {
   return { tables, writes, from };
 }
 
-const live = (id, customer, created, periodEnd, status = 'active') => ({ id, customer, status, created: secs(created), cancel_at_period_end: false, items: { data: [{ current_period_end: secs(periodEnd) }] } });
+const live = (id, customer, created, periodEnd, status = 'active', product = 'prod_ours') => ({ id, customer, status, created: secs(created), cancel_at_period_end: false, items: { data: [{ current_period_end: secs(periodEnd), price: { id: product === 'prod_ours' ? 'price_month' : 'price_other', product } }] } });
 const get = (qs) => ({ httpMethod: 'GET', headers: { origin: 'https://redactid.app' }, queryStringParameters: qs });
 const post = (body) => ({ httpMethod: 'POST', headers: { origin: 'https://redactid.app' }, body: JSON.stringify(body) });
 
@@ -220,5 +221,28 @@ describe('stripe-checkout', () => {
     const res = await handler(post({ priceKey: 'monthly', email: 'a@b.c' }));
     expect(res.statusCode).toBe(200);
     expect(stripeFake.calls.checkoutCreate).toHaveLength(1);
+  });
+});
+
+describe("the other app's subscription on the same email", () => {
+  it('does not make the entitlement premium', async () => {
+    stripeFake = makeStripe({ customers: [{ id: 'cus_1', email: 'a@b.c' }], subscriptions: [live('sub_theirs', 'cus_1', NOW - DAY, NOW + 29 * DAY, 'active', 'prod_theirs')] });
+    const { handler } = await import('../entitlement.js');
+    expect(JSON.parse((await handler(get({ email: 'a@b.c' }))).body).premium).toBe(false);
+  });
+
+  it('is not cancelled by delete-account', async () => {
+    stripeFake = makeStripe({ customers: [{ id: 'cus_1', email: 'a@b.c' }], subscriptions: [live('sub_theirs', 'cus_1', NOW - DAY, NOW + 29 * DAY, 'active', 'prod_theirs'), live('sub_ours', 'cus_1', NOW - DAY, NOW + 29 * DAY)] });
+    const { handler } = await import('../delete-account.js');
+    await handler(post({ email: 'a@b.c' }));
+    expect(stripeFake.calls.cancelled).toEqual(['sub_ours']);
+  });
+
+  it('does not block a checkout for this app', async () => {
+    stripeFake = makeStripe({ customers: [{ id: 'cus_1', email: 'a@b.c' }], subscriptions: [live('sub_theirs', 'cus_1', NOW - DAY, NOW + 29 * DAY, 'active', 'prod_theirs')] });
+    const { handler } = await import('../stripe-checkout.js');
+    const res = await handler(post({ priceKey: 'monthly', email: 'a@b.c' }));
+    expect(res.statusCode).toBe(200);
+    expect(stripeFake.calls.checkoutCreate[0]).toMatchObject({ customer: 'cus_1' });   // still reuses the person's customer
   });
 });

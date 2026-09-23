@@ -14,6 +14,11 @@ const secs = (ms) => Math.floor(ms / 1000);
 // Minimal stand-ins for the two SDK surfaces the helper touches. Stripe's
 // current_period_end lives on the subscription item (2024-12-18+ API) — the
 // fakes put it there, with an optional legacy copy on the subscription.
+// Two apps share the Stripe account. OURS is RedactID's product; OTHER is the
+// other app's. Every helper must ignore OTHER's subscriptions entirely.
+const OURS = { priceIds: ['price_month', 'price_year'], product: 'prod_redactid' };
+const OTHER_PRODUCT = 'prod_companion';
+
 function fakeStripe({ customers = [], subscriptions = [] } = {}) {
   const cancelled = [];
   return {
@@ -25,13 +30,16 @@ function fakeStripe({ customers = [], subscriptions = [] } = {}) {
       list: async ({ customer }) => ({ data: subscriptions.filter((s) => s.customer === customer) }),
       cancel: async (id) => { cancelled.push(id); return { id, status: 'canceled' }; },
     },
+    prices: {
+      retrieve: async (id) => ({ id, product: OURS.priceIds.includes(id) ? OURS.product : OTHER_PRODUCT }),
+    },
   };
 }
 
-function sub({ id, customer, status = 'active', created, periodEnd, cancelAtPeriodEnd = false }) {
+function sub({ id, customer, status = 'active', created, periodEnd, cancelAtPeriodEnd = false, product = OURS.product }) {
   return {
     id, customer, status, created: secs(created), cancel_at_period_end: cancelAtPeriodEnd,
-    items: { data: [{ current_period_end: secs(periodEnd) }] },
+    items: { data: [{ current_period_end: secs(periodEnd), price: { id: product === OURS.product ? 'price_month' : 'price_other', product } }] },
   };
 }
 
@@ -72,20 +80,20 @@ describe('listStripeSubscriptions', () => {
         sub({ id: 'sub_x', customer: 'cus_other', created: NOW - DAY, periodEnd: NOW + DAY }),
       ],
     });
-    const list = await listStripeSubscriptions(stripe, 'x@y.z');
+    const list = await listStripeSubscriptions(stripe, 'x@y.z', OURS.priceIds);
     expect(list.map((s) => s.id)).toEqual(['sub_1', 'sub_2']);
     expect(list[1]).toMatchObject({ customer: 'cus_B', status: 'active', currentPeriodEnd: NOW + 20 * DAY });
   });
 
   it('reads current_period_end from the subscription itself when the item lacks it (older API shape)', async () => {
-    const legacy = { id: 'sub_l', customer: 'cus_A', status: 'active', created: secs(NOW - DAY), cancel_at_period_end: false, current_period_end: secs(NOW + 5 * DAY), items: { data: [{}] } };
+    const legacy = { id: 'sub_l', customer: 'cus_A', status: 'active', created: secs(NOW - DAY), cancel_at_period_end: false, current_period_end: secs(NOW + 5 * DAY), items: { data: [{ price: { id: 'price_month', product: OURS.product } }] } };
     const stripe = fakeStripe({ customers: [{ id: 'cus_A', email: 'x@y.z' }], subscriptions: [legacy] });
-    const [s] = await listStripeSubscriptions(stripe, 'x@y.z');
+    const [s] = await listStripeSubscriptions(stripe, 'x@y.z', OURS.priceIds);
     expect(s.currentPeriodEnd).toBe(NOW + 5 * DAY);
   });
 
   it('is empty for an email Stripe has never seen', async () => {
-    expect(await listStripeSubscriptions(fakeStripe(), 'nobody@y.z')).toEqual([]);
+    expect(await listStripeSubscriptions(fakeStripe(), 'nobody@y.z', OURS.priceIds)).toEqual([]);
   });
 });
 
@@ -153,21 +161,21 @@ describe('reconcileFromStripe', () => {
 
   it('creates the missing row from Stripe (the drice233 case)', async () => {
     const db = fakeSupabase([]);
-    const result = await reconcileFromStripe({ stripe: stripeWithLive(), supabase: db, email: 'x@y.z', now: NOW });
+    const result = await reconcileFromStripe({ stripe: stripeWithLive(), supabase: db, email: 'x@y.z', now: NOW, priceIds: OURS.priceIds });
     expect(result).toMatchObject({ subscription_id: 'sub_live', customer_id: 'cus_live', status: 'active' });
     expect(db.table.get('x@y.z')).toMatchObject({ subscription_id: 'sub_live', current_period_end: NOW + 27 * DAY });
   });
 
   it('re-points a row stuck on a dead subscription to the live one (the foxdigital case)', async () => {
     const db = fakeSupabase([{ email: 'x@y.z', customer_id: 'cus_dead', subscription_id: 'sub_dead', status: 'canceled', current_period_end: NOW + 27 * DAY }]);
-    const result = await reconcileFromStripe({ stripe: stripeWithLive(), supabase: db, email: 'x@y.z', now: NOW });
+    const result = await reconcileFromStripe({ stripe: stripeWithLive(), supabase: db, email: 'x@y.z', now: NOW, priceIds: OURS.priceIds });
     expect(result.subscription_id).toBe('sub_live');
     expect(db.table.get('x@y.z').customer_id).toBe('cus_live');
   });
 
   it('leaves a correct row alone (no write) when Stripe agrees with it', async () => {
     const db = fakeSupabase([{ email: 'x@y.z', customer_id: 'cus_live', subscription_id: 'sub_live', status: 'active', current_period_end: NOW + 27 * DAY }]);
-    const result = await reconcileFromStripe({ stripe: stripeWithLive(), supabase: db, email: 'x@y.z', now: NOW });
+    const result = await reconcileFromStripe({ stripe: stripeWithLive(), supabase: db, email: 'x@y.z', now: NOW, priceIds: OURS.priceIds });
     expect(result.subscription_id).toBe('sub_live');
     expect(db.writes).toEqual([]);
   });
@@ -175,14 +183,14 @@ describe('reconcileFromStripe', () => {
   it('returns null and writes nothing when Stripe has nothing entitling — never invents access', async () => {
     const stripe = fakeStripe({ customers: [{ id: 'cus_A', email: 'x@y.z' }], subscriptions: [sub({ id: 's', customer: 'cus_A', status: 'canceled', created: NOW - 60 * DAY, periodEnd: NOW - 30 * DAY })] });
     const db = fakeSupabase([]);
-    expect(await reconcileFromStripe({ stripe, supabase: db, email: 'x@y.z', now: NOW })).toBeNull();
+    expect(await reconcileFromStripe({ stripe, supabase: db, email: 'x@y.z', now: NOW, priceIds: OURS.priceIds })).toBeNull();
     expect(db.writes).toEqual([]);
   });
 
   it('returns null and writes nothing when Stripe cannot be reached', async () => {
     const stripe = { customers: { list: async () => { throw new Error('network'); } }, subscriptions: { list: async () => ({ data: [] }) } };
     const db = fakeSupabase([]);
-    expect(await reconcileFromStripe({ stripe, supabase: db, email: 'x@y.z', now: NOW })).toBeNull();
+    expect(await reconcileFromStripe({ stripe, supabase: db, email: 'x@y.z', now: NOW, priceIds: OURS.priceIds })).toBeNull();
     expect(db.writes).toEqual([]);
   });
 });
@@ -198,7 +206,7 @@ describe('cancelAllSubscriptions', () => {
         sub({ id: 'sub_gone', customer: 'cus_A', status: 'canceled', created: NOW - 400 * DAY, periodEnd: NOW - 370 * DAY }),
       ],
     });
-    const result = await cancelAllSubscriptions(stripe, 'x@y.z');
+    const result = await cancelAllSubscriptions(stripe, 'x@y.z', OURS.priceIds);
     expect(stripe.cancelled.sort()).toEqual(['sub_a', 'sub_b', 'sub_past_due']);
     expect(result.cancelled.slice().sort()).toEqual(['sub_a', 'sub_b', 'sub_past_due']);
     expect(result.failed).toEqual([]);
@@ -214,8 +222,56 @@ describe('cancelAllSubscriptions', () => {
     });
     const realCancel = stripe.subscriptions.cancel;
     stripe.subscriptions.cancel = async (id) => { if (id === 'sub_bad') throw new Error('boom'); return realCancel(id); };
-    const result = await cancelAllSubscriptions(stripe, 'x@y.z');
+    const result = await cancelAllSubscriptions(stripe, 'x@y.z', OURS.priceIds);
     expect(result.cancelled).toEqual(['sub_ok']);
     expect(result.failed).toEqual([{ id: 'sub_bad', error: 'boom' }]);
+  });
+});
+
+describe("the other app's subscriptions on the same email (shared Stripe account)", () => {
+  const both = () => fakeStripe({
+    customers: [{ id: 'cus_theirs', email: 'x@y.z' }, { id: 'cus_ours', email: 'x@y.z' }],
+    subscriptions: [
+      sub({ id: 'sub_theirs', customer: 'cus_theirs', created: NOW - DAY, periodEnd: NOW + 29 * DAY, product: OTHER_PRODUCT }),
+      sub({ id: 'sub_ours', customer: 'cus_ours', created: NOW - 100 * DAY, periodEnd: NOW + 10 * DAY }),
+    ],
+  });
+
+  it('are left out of the listing', async () => {
+    const list = await listStripeSubscriptions(both(), 'x@y.z', OURS.priceIds);
+    expect(list.map((s) => s.id)).toEqual(['sub_ours']);
+  });
+
+  it('never entitle this app, even when they are the newest live subscription', async () => {
+    const db = fakeSupabase([]);
+    const row = await reconcileFromStripe({ stripe: both(), supabase: db, email: 'x@y.z', now: NOW, priceIds: OURS.priceIds });
+    expect(row.subscription_id).toBe('sub_ours');
+  });
+
+  it('grant nothing when the email only subscribes to the other app', async () => {
+    const stripe = fakeStripe({ customers: [{ id: 'c', email: 'x@y.z' }], subscriptions: [sub({ id: 'sub_theirs', customer: 'c', created: NOW - DAY, periodEnd: NOW + 29 * DAY, product: OTHER_PRODUCT })] });
+    expect(await reconcileFromStripe({ stripe, supabase: fakeSupabase([]), email: 'x@y.z', now: NOW, priceIds: OURS.priceIds })).toBeNull();
+  });
+
+  it("are NEVER cancelled by this app's account deletion", async () => {
+    const stripe = both();
+    const result = await cancelAllSubscriptions(stripe, 'x@y.z', OURS.priceIds);
+    expect(stripe.cancelled).toEqual(['sub_ours']);
+    expect(result.cancelled).toEqual(['sub_ours']);
+  });
+
+  it('with no price list at all, nothing is listed and nothing is cancelled (fail closed)', async () => {
+    const stripe = both();
+    expect(await listStripeSubscriptions(stripe, 'x@y.z', [])).toEqual([]);
+    expect(await cancelAllSubscriptions(stripe, 'x@y.z', undefined)).toEqual({ cancelled: [], failed: [] });
+    expect(stripe.cancelled).toEqual([]);
+  });
+
+  it('match by PRODUCT, so an older price of the same product still counts as ours', async () => {
+    const stripe = fakeStripe({ customers: [{ id: 'c', email: 'x@y.z' }], subscriptions: [] });
+    const old = { id: 'sub_oldprice', customer: 'c', status: 'active', created: secs(NOW - 300 * DAY), cancel_at_period_end: false, items: { data: [{ current_period_end: secs(NOW + 20 * DAY), price: { id: 'price_retired_2025', product: OURS.product } }] } };
+    stripe.subscriptions.list = async () => ({ data: [old] });
+    const list = await listStripeSubscriptions(stripe, 'x@y.z', OURS.priceIds);
+    expect(list.map((s) => s.id)).toEqual(['sub_oldprice']);
   });
 });

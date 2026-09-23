@@ -7,6 +7,13 @@
 // meant "Inactive" in the app while Stripe kept billing. These helpers let
 // the functions ask Stripe directly and repair the row.
 //
+// The Stripe account is SHARED with another app (Companion), and a person can
+// subscribe to both with one email. Every helper therefore takes the price ids
+// this app sells (`priceIds`, from env) and looks only at subscriptions whose
+// PRODUCT matches - product rather than price so an older price of the same
+// plan still counts. Without a price list nothing is listed (fail closed):
+// better to show a paywall than to cancel someone's other-app subscription.
+//
 // Every function takes the Stripe and Supabase clients as arguments so the
 // logic is unit-testable with fakes.
 
@@ -17,6 +24,36 @@ const RUNNING = new Set(['active', 'trialing', 'past_due', 'unpaid', 'incomplete
 
 function emailKey(email) {
   return String(email || '').trim().toLowerCase();
+}
+
+/** The price ids this deployment sells, from env. */
+export function ownPriceIds() {
+  return [process.env.STRIPE_PRICE_MONTHLY, process.env.STRIPE_PRICE_ANNUAL].filter(Boolean);
+}
+
+// price id -> product id, looked up once per function instance.
+const productCache = new Map();
+async function ownProductIds(stripe, priceIds) {
+  const out = new Set();
+  for (const id of priceIds || []) {
+    if (!productCache.has(id)) {
+      const price = await stripe.prices.retrieve(id);
+      productCache.set(id, typeof price.product === 'string' ? price.product : price.product?.id);
+    }
+    if (productCache.get(id)) out.add(productCache.get(id));
+  }
+  return out;
+}
+
+function subscriptionProduct(subscription) {
+  const price = subscription?.items?.data?.[0]?.price;
+  return typeof price?.product === 'string' ? price.product : price?.product?.id || null;
+}
+
+/** Whether a raw Stripe subscription belongs to this app. */
+export async function isOwnSubscription(stripe, subscription, priceIds = ownPriceIds()) {
+  const products = await ownProductIds(stripe, priceIds);
+  return products.has(subscriptionProduct(subscription));
 }
 
 // Stripe moved current_period_end from the Subscription onto each item in the
@@ -31,14 +68,17 @@ function periodEndMs(subscription) {
  * carries it (Checkout creates a new Customer per purchase), oldest first.
  * Normalised to what the rest of the code needs.
  */
-export async function listStripeSubscriptions(stripe, email) {
+export async function listStripeSubscriptions(stripe, email, priceIds) {
   const key = emailKey(email);
   if (!key) return [];
+  const products = await ownProductIds(stripe, priceIds);
+  if (products.size === 0) return [];
   const customers = await stripe.customers.list({ email: key, limit: 100 });
   const out = [];
   for (const customer of customers.data || []) {
     const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'all', limit: 100 });
     for (const s of subs.data || []) {
+      if (!products.has(subscriptionProduct(s))) continue;
       out.push({
         id: s.id,
         customer: customer.id,
@@ -86,11 +126,11 @@ export function rowFromSubscription(email, sub, now = Date.now()) {
  * downgrades a row on its own: the webhooks own that path). Any Stripe or
  * DB failure also returns null; callers fall back to whatever they had.
  */
-export async function reconcileFromStripe({ stripe, supabase, email, now = Date.now() }) {
+export async function reconcileFromStripe({ stripe, supabase, email, now = Date.now(), priceIds = ownPriceIds() }) {
   const key = emailKey(email);
   if (!key) return null;
   try {
-    const pick = pickEntitlingSubscription(await listStripeSubscriptions(stripe, key), now);
+    const pick = pickEntitlingSubscription(await listStripeSubscriptions(stripe, key, priceIds), now);
     if (!pick) return null;
     const row = rowFromSubscription(key, pick, now);
 
@@ -121,10 +161,10 @@ export async function reconcileFromStripe({ stripe, supabase, email, now = Date.
  * running — across all its Customers, not just the one the row knows about.
  * Best effort per subscription; the caller decides what a failure means.
  */
-export async function cancelAllSubscriptions(stripe, email) {
+export async function cancelAllSubscriptions(stripe, email, priceIds = ownPriceIds()) {
   const cancelled = [];
   const failed = [];
-  const subs = await listStripeSubscriptions(stripe, email);
+  const subs = await listStripeSubscriptions(stripe, email, priceIds);
   for (const s of subs) {
     if (!RUNNING.has(s.status)) continue;
     try {

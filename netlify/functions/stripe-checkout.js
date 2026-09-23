@@ -6,7 +6,7 @@
 // old customer with nothing live → reuse that Customer, so a person keeps
 // ONE Stripe customer across purchases instead of one per checkout.
 import { getStripe } from './_clients.js';
-import { listStripeSubscriptions, pickEntitlingSubscription } from './_subscriptionSync.js';
+import { listStripeSubscriptions, pickEntitlingSubscription, ownPriceIds } from './_subscriptionSync.js';
 import { rateLimit, checkOrigin } from './rateLimit.js';
 import { withSentry, captureException } from './_sentry.js';
 import { withCors } from './_cors.js';
@@ -74,7 +74,7 @@ async function stripeCheckoutHandler(event) {
   const email = String(body.email || '').trim().toLowerCase();
   if (email && email.length <= 254) {
     try {
-      const subs = await listStripeSubscriptions(getStripe(), email);
+      const subs = await listStripeSubscriptions(getStripe(), email, ownPriceIds());
       if (pickEntitlingSubscription(subs)) {
         return {
           statusCode: 409,
@@ -82,8 +82,13 @@ async function stripeCheckoutHandler(event) {
           body: JSON.stringify({ error: 'already_subscribed' }),
         };
       }
-      // Newest existing customer, if any; otherwise just prefill the email.
-      const existing = subs.length ? subs[subs.length - 1].customer : null;
+      // Newest existing customer, if any (this app's, else any customer
+      // Stripe has for the email); otherwise just prefill the email.
+      let existing = subs.length ? subs[subs.length - 1].customer : null;
+      if (!existing) {
+        const any = await getStripe().customers.list({ email, limit: 100 });
+        existing = any.data?.length ? any.data[any.data.length - 1].id : null;
+      }
       if (existing) params.customer = existing;
       else params.customer_email = email;
     } catch (err) {

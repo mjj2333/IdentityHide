@@ -3,21 +3,17 @@
 // lowercased email. No rate limiting — Stripe retries are idempotent and we
 // want to accept every legitimate event.
 //
+// Only this app's subscriptions (matched by product, see _subscriptionSync)
+// are handled: the Stripe account is shared with another app, whose events
+// arrive here too and used to overwrite this app's rows.
+//
 // Relevant events:
 // - checkout.session.completed: first subscription signup, creates/updates row
 // - customer.subscription.updated: plan change / renewal / payment_status flip
 // - customer.subscription.deleted: cancellation took effect, mark canceled
-import Stripe from 'stripe';
-import { createClient } from '@supabase/supabase-js';
+import { getStripe, getSupabase } from './_clients.js';
+import { isOwnSubscription, reconcileFromStripe } from './_subscriptionSync.js';
 import { withSentry, captureException } from './_sentry.js';
-
-let supabase;
-function getSupabase() {
-  if (!supabase) {
-    supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  }
-  return supabase;
-}
 
 function emailKey(email) {
   return String(email || '').trim().toLowerCase();
@@ -62,12 +58,25 @@ async function handleCheckoutCompleted(stripe, session) {
       captureException(err, { context: 'webhook.retrieve-subscription', sessionId: session.id });
     }
   }
+  if (subscription && !(await isOwnSubscription(stripe, subscription))) return;   // the other app's sale
   await upsert(email, {
     customer_id: session.customer,
     subscription_id: session.subscription || null,
     status: subscription?.status || 'active',
     current_period_end: resolveCurrentPeriodEnd(subscription),
   });
+}
+
+// True when the row for this email is about this very subscription (or has
+// no subscription recorded / no row - nothing to protect).
+async function rowIsAbout(email, subscription) {
+  const { data, error } = await getSupabase()
+    .from('subscriptions')
+    .select('subscription_id')
+    .eq('email', emailKey(email))
+    .maybeSingle();
+  if (error) throw error;
+  return !data?.subscription_id || data.subscription_id === subscription.id;
 }
 
 async function handleSubscriptionUpdated(stripe, subscription) {
@@ -80,6 +89,14 @@ async function handleSubscriptionUpdated(stripe, subscription) {
   }
   if (!email) {
     console.warn('[stripe-webhook] subscription.updated with no customer email', subscription.id);
+    return;
+  }
+  if (!(await isOwnSubscription(stripe, subscription))) return;
+  if (!(await rowIsAbout(email, subscription))) {
+    // An event about ANOTHER of this app's subscriptions for the same email
+    // (a duplicate purchase being cancelled, say). Don't smear its status
+    // over the row; let Stripe say which subscription should hold it.
+    await reconcileFromStripe({ stripe, supabase: getSupabase(), email });
     return;
   }
   // UPDATE-only (not upsert). Same rationale as handleSubscriptionDeleted:
@@ -114,6 +131,11 @@ async function handleSubscriptionDeleted(stripe, subscription) {
     captureException(err, { context: 'webhook.retrieve-customer', customerId: subscription.customer });
   }
   if (!email) return;
+  if (!(await isOwnSubscription(stripe, subscription))) return;
+  if (!(await rowIsAbout(email, subscription))) {
+    await reconcileFromStripe({ stripe, supabase: getSupabase(), email });
+    return;
+  }
   // UPDATE-only (not upsert). Two reasons:
   //   1. If the user has just deleted their account via /delete-account, the
   //      subscriptions row is already gone. Upserting here would resurrect
@@ -156,7 +178,7 @@ async function stripeWebhookHandler(event) {
     return { statusCode: 400, body: 'Missing signature' };
   }
 
-  const stripe = new Stripe(secret);
+  const stripe = getStripe();
   let stripeEvent;
   try {
     stripeEvent = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
