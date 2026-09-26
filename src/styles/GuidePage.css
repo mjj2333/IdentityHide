@@ -1,0 +1,107 @@
+/* SEO content pages (components/GuidePage). Same reading column and type as
+   the FAQ / Terms screens, plus images, before/after pairs and CTAs. */
+.guide-container {
+  display: flex;
+  flex-direction: column;
+  padding: 24px 20px 56px;
+  max-width: 720px;
+  margin: 0 auto;
+  color: var(--text);
+  line-height: 1.6;
+  font-size: 16px;
+}
+
+.guide-container h1.guide-title {
+  font-family: var(--serif);
+  font-size: clamp(32px, 6vw, 44px);
+  font-weight: 500;
+  letter-spacing: -0.8px;
+  line-height: 1.1;
+  color: var(--fg);
+  margin: 8px 0 12px;
+}
+
+.guide-container h2 {
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.3px;
+  line-height: 1.25;
+  color: var(--fg);
+  margin: 28px 0 8px;
+  scroll-margin-top: 72px;
+}
+
+.guide-container h1 + h2 {
+  margin-top: 0;
+  font-family: var(--sans);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-dim);
+}
+
+.guide-container h3 {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--fg);
+  margin: 20px 0 6px;
+  scroll-margin-top: 72px;
+}
+
+.guide-container p { margin: 0 0 12px; }
+.guide-container ul,
+.guide-container ol { margin: 0 0 14px; padding-left: 22px; }
+.guide-container li { margin-bottom: 6px; }
+.guide-container a:not(.btn) { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.guide-container strong { color: var(--fg); font-weight: 600; }
+
+.guide-container hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 24px 0 4px;
+  width: 100%;
+}
+
+.guide-figure,
+.guide-pair { margin: 8px 0 18px; }
+
+.guide-figure img,
+.guide-pair img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.guide-figure img { max-width: 520px; margin: 0 auto; }
+
+.guide-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.guide-pair figcaption {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-align: center;
+  margin-top: 6px;
+}
+
+.guide-cta { margin: 8px 0 18px; }
+.guide-cta .btn { display: inline-flex; text-decoration: none; }
+
+.guide-related {
+  margin-top: 36px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.guide-related h2 { font-size: 18px; margin: 0 0 8px; }
+.guide-related ul { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; }

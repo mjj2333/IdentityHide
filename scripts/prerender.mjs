@@ -28,6 +28,10 @@ const ROUTES = [
   { route: '/faq', ready: '.faq-title' },
   { route: '/privacy', ready: '.terms-title' },
   { route: '/terms', ready: '.terms-title' },
+  { route: '/face-blur-app', ready: '.guide-title' },
+  { route: '/remove-exif-data', ready: '.guide-title' },
+  { route: '/tattoo-removal-app', ready: '.guide-title' },
+  { route: '/post-photos-anonymously', ready: '.guide-title' },
 ];
 
 // UI that must never be baked into static HTML (per-visitor or transient).

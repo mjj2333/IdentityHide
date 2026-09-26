@@ -468,6 +468,10 @@ export default function LandingScreen({ onEnter }) {
             <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
             <a href="/faq">FAQ</a>
+            <a href="/face-blur-app">Face blur</a>
+            <a href="/remove-exif-data">Remove EXIF data</a>
+            <a href="/tattoo-removal-app">Tattoo removal</a>
+            <a href="/post-photos-anonymously">Posting anonymously</a>
             <a href="/feedback">Feedback</a>
           </nav>
           <span className="landing-footer-copy">&copy; {year} Redact.ID</span>
