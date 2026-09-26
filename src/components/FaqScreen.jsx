@@ -32,18 +32,18 @@ const FAQ_DATA = [
         aHtml: '<p>AI is used for two key functions:</p><ul><li>Face detection and blurring — runs entirely in your browser using a small on-device model</li><li>Tattoo removal — your image is sent to our processing server, where AI inpainting fills in the area you marked and returns the result; we use it only to produce that result, never to train AI or share it</li></ul><p>Everything else — mask editing, metadata stripping, and export — stays on your device.</p>',
       },
       {
-        q: 'What do I get with the premium plan? (Coming soon)',
+        q: 'What do I get with the premium plan?',
         a: (
           <>
             <p>The premium plan includes:</p>
             <ul>
               <li>No ads</li>
               <li>Unlimited AI tattoo removal</li>
-              <li>Batch processing for multiple images</li>
+              <li>Batch processing of up to 20 photos at a time (free users can batch 3)</li>
             </ul>
           </>
         ),
-        aHtml: '<p>The premium plan includes:</p><ul><li>No ads</li><li>Unlimited AI tattoo removal</li><li>Batch processing for multiple images</li></ul>',
+        aHtml: '<p>The premium plan includes:</p><ul><li>No ads</li><li>Unlimited AI tattoo removal</li><li>Batch processing of up to 20 photos at a time (free users can batch 3)</li></ul>',
       },
       {
         q: 'Is AI tattoo removal free?',
