@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import ScreenShell from './ScreenShell';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
 import { GUIDES, getGuide } from '../content/guides';
@@ -65,6 +65,13 @@ export default function GuidePage({ route, onBack }) {
     canonical: guide ? SITE + guide.route : undefined,
     ogImage: `${SITE}/og-image.png`,
   });
+  // Links like /post-photos-anonymously#a-quick-privacy-checklist-before-posting:
+  // the browser jumps to the anchor in the prerendered HTML, but mounting the
+  // app replaces that page and the scroll resets, so jump again once rendered.
+  useEffect(() => {
+    const id = decodeURIComponent(window.location.hash.slice(1));
+    if (id) document.getElementById(id)?.scrollIntoView();
+  }, [route]);
   if (!guide) return null;
 
   const faqSchema = faq.length ? {

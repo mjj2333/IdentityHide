@@ -1,11 +1,20 @@
 /* SEO content pages (components/GuidePage). Same reading column and type as
    the FAQ / Terms screens, plus images, before/after pairs and CTAs. */
+/* The app shell is a fixed-height frame (.screen-content has overflow:
+   hidden), so the page scrolls here. Full width, with the 720px reading
+   column made by the side padding, so wheel/touch scrolling works anywhere
+   on the page, not only over the text. */
 .guide-container {
   display: flex;
   flex-direction: column;
-  padding: 24px 20px 56px;
-  max-width: 720px;
-  margin: 0 auto;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 24px max(20px, calc((100% - 720px) / 2)) calc(56px + var(--safe-area-bottom, 0px));
   color: var(--text);
   line-height: 1.6;
   font-size: 16px;

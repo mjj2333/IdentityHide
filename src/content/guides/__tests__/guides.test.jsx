@@ -105,6 +105,16 @@ describe('GuidePage', () => {
     expect(container.querySelector('#a-quick-privacy-checklist-before-posting')).toBeTruthy();
   });
 
+  it('jumps to the heading in the URL hash once the page has rendered (the app replaces the prerendered page, resetting scroll)', () => {
+    const spy = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = spy;
+    window.history.replaceState(null, '', '/post-photos-anonymously#a-quick-privacy-checklist-before-posting');
+    const { container } = render(<GuidePage route="/post-photos-anonymously" />);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.contexts[0]).toBe(container.querySelector('#a-quick-privacy-checklist-before-posting'));
+    window.history.replaceState(null, '', '/');
+  });
+
   it('knows every route it is asked for', () => {
     GUIDE_ROUTES.forEach((r) => expect(getGuide(r)).toBeTruthy());
     expect(getGuide('/nope')).toBeNull();
