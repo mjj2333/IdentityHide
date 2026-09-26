@@ -1,6 +1,7 @@
 import { Component } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
+import { preloadPrerenderedRoute } from './prerenderedScreens.js'
 import { initSentry, captureException } from './utils/sentry.js'
 import { getNativePlatform } from './utils/platform.js'
 import { initDiagnostics } from './utils/perfDiagnostics.js'
@@ -89,9 +90,17 @@ if (!rootElement) {
   }).observe(rootElement, { childList: true, subtree: true });
 
   // ── Render ──
-  createRoot(rootElement).render(
+  // A prerendered page (scripts/prerender.mjs) is already on screen. Load its
+  // screen's chunk first so React's first commit is the same content, not the
+  // Suspense fallback (null) — otherwise the page would blink blank. The inline
+  // guard in the HTML has already removed the attribute if the markup doesn't
+  // apply to this visit. A failed preload still mounts (lazy loading retries).
+  const mount = () => createRoot(rootElement).render(
     <ErrorBoundary>
       <App />
     </ErrorBoundary>
   );
+  const prerendered = rootElement.getAttribute('data-prerendered');
+  if (prerendered) preloadPrerenderedRoute(prerendered).then(mount, mount);
+  else mount();
 }

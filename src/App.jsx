@@ -2,6 +2,8 @@ import { Component, useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { PipelineProvider, usePipeline } from './context/PipelineContext';
 import { BatchProvider, useBatch } from './context/BatchContext';
 import { EntitlementProvider } from './context/EntitlementContext';
+import { LandingScreen, FaqScreen, PrivacyScreen, TermsScreen } from './prerenderedScreens';
+import { routePath } from './utils/routePath';
 import DropZone from './components/DropZone';
 import LoadingOverlay from './components/LoadingOverlay';
 import ThemeToggle from './components/ThemeToggle';
@@ -28,11 +30,7 @@ const BatchEditorScreen = lazy(() => import('./components/BatchEditorScreen'));
 const BatchExportScreen = lazy(() => import('./components/BatchExportScreen'));
 const AdminDashboard = lazy(() => import('./components/AdminDashboard'));
 const FeedbackScreen = lazy(() => import('./components/FeedbackScreen'));
-const TermsScreen = lazy(() => import('./components/TermsScreen'));
-const PrivacyScreen = lazy(() => import('./components/PrivacyScreen'));
-const FaqScreen = lazy(() => import('./components/FaqScreen'));
 const AccountScreen = lazy(() => import('./components/AccountScreen'));
-const LandingScreen = lazy(() => import('./components/LandingScreen'));
 // Opt-in diagnostics overlay (?diag=1) — lazy so it never enters the main chunk.
 const DiagPanel = lazy(() => import('./components/DiagPanel'));
 
@@ -225,7 +223,7 @@ function ScreenRouter() {
   );
 }
 
-const pathname = window.location.pathname;
+const pathname = routePath(window.location.pathname);
 
 export default function App() {
   // Single place that owns SW registration + new-version detection.

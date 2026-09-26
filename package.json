@@ -19,7 +19,8 @@
     "android:sync": "npm run build && npx cap sync android",
     "android:open": "npx cap open android",
     "android:livereload": "node scripts/cap-livereload.mjs android",
-    "ios:livereload": "node scripts/cap-livereload.mjs ios"
+    "ios:livereload": "node scripts/cap-livereload.mjs ios",
+    "build:web": "vite build && node scripts/prerender.mjs"
   },
   "dependencies": {
     "@capacitor-community/admob": "^8.0.0",

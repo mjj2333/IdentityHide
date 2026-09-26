@@ -1,6 +1,6 @@
 [build]
   publish = "dist"
-  command = "npm run build"
+  command = "npm run build:web"
 
 [functions]
   directory = "netlify/functions"
@@ -11,6 +11,9 @@
   to = "/favicon.png"
   status = 200
 
+# /, /faq, /privacy and /terms are prerendered to static files by
+# scripts/prerender.mjs (npm run build:web), so they need no rewrite; the
+# app-only routes below still fall back to the SPA shell.
 [[redirects]]
   from = "/admin"
   to = "/index.html"
@@ -18,21 +21,6 @@
 
 [[redirects]]
   from = "/feedback"
-  to = "/index.html"
-  status = 200
-
-[[redirects]]
-  from = "/terms"
-  to = "/index.html"
-  status = 200
-
-[[redirects]]
-  from = "/privacy"
-  to = "/index.html"
-  status = 200
-
-[[redirects]]
-  from = "/faq"
   to = "/index.html"
   status = 200
 
