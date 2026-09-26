@@ -5,7 +5,7 @@
 // headless Chromium against the freshly built dist/, captures what users see
 // (the #root markup, the route's title/description/canonical from
 // useDocumentMeta, and the lazy CSS + JS it loaded) and writes it into
-// dist/<route>/index.html via ./prerender/inject.mjs.
+// dist/<route>.html (dist/index.html for /) via ./prerender/inject.mjs.
 //
 // Only content routes are prerendered; the editor stays client-side. Native
 // builds use plain `vite build` and never run this.
@@ -98,9 +98,12 @@ async function main() {
 
   const results = [];
   for (const page of captures) {
-    const outDir = page.route === '/' ? DIST : path.join(DIST, page.route.slice(1));
-    await mkdir(outDir, { recursive: true });
-    await writeFile(path.join(outDir, 'index.html'), injectPrerender(shell, page));
+    // /faq -> dist/faq.html, not dist/faq/index.html: Netlify serves faq.html
+    // at /faq as-is, but answers /faq with a 301 to /faq/ when a faq/ folder
+    // exists, which would fight the canonical URL and sitemap (both /faq).
+    const outFile = page.route === '/' ? path.join(DIST, 'index.html') : path.join(DIST, `${page.route.slice(1)}.html`);
+    await mkdir(path.dirname(outFile), { recursive: true });
+    await writeFile(outFile, injectPrerender(shell, page));
     results.push(`${page.route.padEnd(9)} ${String(page.rootHtml.length).padStart(7)} chars  "${page.title}"`);
   }
   console.log(`[prerender] wrote ${results.length} pages:\n  ${results.join('\n  ')}`);
