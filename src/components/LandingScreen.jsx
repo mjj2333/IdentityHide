@@ -143,17 +143,16 @@ const FAQS = [
   },
   {
     q: 'Which platforms can I use it on?',
-    a: 'Any modern browser today, and you can install it as an app on Android, iOS, Windows, and Mac. The Android app is now on Google Play, with the App Store version coming soon.',
+    a: 'Any modern browser today, and you can install it as an app on Android, iOS, Windows, and Mac. The apps are on Google Play and the App Store.',
   },
 ];
 
 const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.redactid.app';
+// Country-neutral form: Apple redirects each visitor to their own storefront.
+const APP_STORE_URL = 'https://apps.apple.com/app/id6791323694';
 
 function StoreBadge({ store }) {
   const isPlay = store === 'play';
-  // The Android app is live on Google Play; the App Store version is still
-  // in progress, so its badge stays a non-interactive "coming soon" chip.
-  const live = isPlay;
   const inner = (
     <>
       <span className="landing-badge-icon" aria-hidden="true">
@@ -164,29 +163,22 @@ function StoreBadge({ store }) {
         )}
       </span>
       <span className="landing-badge-text">
-        <span className="landing-badge-sub">{live ? 'Get it on' : 'Coming soon to'}</span>
+        <span className="landing-badge-sub">{isPlay ? 'Get it on' : 'Download on the'}</span>
         <span className="landing-badge-store">{isPlay ? 'Google Play' : 'App Store'}</span>
       </span>
     </>
   );
-  if (live) {
-    return (
-      <a
-        className="landing-badge landing-badge-live"
-        href={PLAY_STORE_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="Get Redact.ID on Google Play"
-        onClick={() => { try { track('landing_store_click', { store: 'play' }); } catch { /* non-blocking */ } }}
-      >
-        {inner}
-      </a>
-    );
-  }
   return (
-    <div className="landing-badge" aria-label="App Store, coming soon">
+    <a
+      className="landing-badge landing-badge-live"
+      href={isPlay ? PLAY_STORE_URL : APP_STORE_URL}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={isPlay ? 'Get Redact.ID on Google Play' : 'Download Redact.ID on the App Store'}
+      onClick={() => { try { track('landing_store_click', { store: isPlay ? 'play' : 'apple' }); } catch { /* non-blocking */ } }}
+    >
       {inner}
-    </div>
+    </a>
   );
 }
 
