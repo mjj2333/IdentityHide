@@ -28,6 +28,7 @@ const ROUTES = [
   { route: '/faq', ready: '.faq-title' },
   { route: '/privacy', ready: '.terms-title' },
   { route: '/terms', ready: '.terms-title' },
+  { route: '/guides', ready: '.guide-title' },
   { route: '/face-blur-app', ready: '.guide-title' },
   { route: '/remove-exif-data', ready: '.guide-title' },
   { route: '/tattoo-removal-app', ready: '.guide-title' },

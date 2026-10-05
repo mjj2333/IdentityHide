@@ -94,6 +94,7 @@ export default function GuidePage({ route, onBack }) {
             {GUIDES.filter((g) => g.route !== route).map((g) => (
               <li key={g.route}><a href={g.route}>{g.navLabel}</a></li>
             ))}
+            <li><a href="/guides">All guides</a></li>
             <li><a href="/faq">FAQ</a></li>
           </ul>
         </nav>

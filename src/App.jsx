@@ -2,7 +2,7 @@ import { Component, useEffect, useRef, useState, lazy, Suspense } from 'react';
 import { PipelineProvider, usePipeline } from './context/PipelineContext';
 import { BatchProvider, useBatch } from './context/BatchContext';
 import { EntitlementProvider } from './context/EntitlementContext';
-import { LandingScreen, FaqScreen, PrivacyScreen, TermsScreen, GuidePage, GUIDE_ROUTES } from './prerenderedScreens';
+import { LandingScreen, FaqScreen, PrivacyScreen, TermsScreen, GuidePage, GuidesIndexPage, GUIDE_ROUTES } from './prerenderedScreens';
 import { routePath } from './utils/routePath';
 import DropZone from './components/DropZone';
 import LoadingOverlay from './components/LoadingOverlay';
@@ -333,6 +333,16 @@ export default function App() {
       <Suspense fallback={null}>
         <ThemeToggle />
         <FaqScreen onBack={() => { window.location.href = '/'; }} />
+        {updatePrompt}
+      </Suspense>
+    );
+  }
+
+  if (pathname === '/guides') {
+    return (
+      <Suspense fallback={null}>
+        <ThemeToggle />
+        <GuidesIndexPage onBack={() => { window.location.href = '/'; }} />
         {updatePrompt}
       </Suspense>
     );

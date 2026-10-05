@@ -8,12 +8,13 @@ export const FaqScreen = lazyWithPreload(() => import('./components/FaqScreen'))
 export const PrivacyScreen = lazyWithPreload(() => import('./components/PrivacyScreen'));
 export const TermsScreen = lazyWithPreload(() => import('./components/TermsScreen'));
 export const GuidePage = lazyWithPreload(() => import('./components/GuidePage'));
+export const GuidesIndexPage = lazyWithPreload(() => import('./components/GuidesIndexPage'));
 
 // The SEO content pages (src/content/guides). Listed here rather than
 // imported from the registry so the markdown stays out of the main bundle.
 export const GUIDE_ROUTES = ['/face-blur-app', '/remove-exif-data', '/tattoo-removal-app', '/post-photos-anonymously'];
 
-const BY_ROUTE = { '/': LandingScreen, '/faq': FaqScreen, '/privacy': PrivacyScreen, '/terms': TermsScreen };
+const BY_ROUTE = { '/guides': GuidesIndexPage, '/': LandingScreen, '/faq': FaqScreen, '/privacy': PrivacyScreen, '/terms': TermsScreen };
 
 /** Load the screen for a prerendered route; resolves at once for any other path. */
 export function preloadPrerenderedRoute(route) {

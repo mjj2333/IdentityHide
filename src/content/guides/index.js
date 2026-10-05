@@ -11,6 +11,8 @@ import postPhotosAnonymously from './post-photos-anonymously.md?raw';
 export const GUIDES = [
   {
     route: '/face-blur-app',
+    kind: 'tool',
+    summary: 'Blur faces automatically, by hand, or with a paint-on brush — and keep your photos on your device.',
     navLabel: 'Face blur app',
     title: 'Face Blur App — Blur Faces in Photos Automatically | Redact.ID',
     description: 'Blur faces in photos automatically, manually or with a paint-on brush. Redact.ID is a free, privacy-first face blur app — your photos stay on your device.',
@@ -18,6 +20,8 @@ export const GUIDES = [
   },
   {
     route: '/remove-exif-data',
+    kind: 'tool',
+    summary: 'Strip the hidden data inside a photo file — location, date, device and camera details — before you share it.',
     navLabel: 'Remove EXIF data',
     title: 'Remove EXIF Data From Photos — Free & Private | Redact.ID',
     description: 'Remove hidden EXIF metadata — GPS location, date, device and camera details — from your photos before you share them. Free, in your browser, no upload.',
@@ -25,6 +29,8 @@ export const GUIDES = [
   },
   {
     route: '/tattoo-removal-app',
+    kind: 'tool',
+    summary: 'Paint over a tattoo and AI rebuilds the skin underneath, for a natural result instead of a blur.',
     navLabel: 'Tattoo removal app',
     title: 'AI Tattoo Removal App — Remove Tattoos From Photos | Redact.ID',
     description: 'Remove tattoos from photos with AI. Paint over the tattoo and Redact.ID rebuilds the skin for a natural result instead of a blur. Try it free.',
@@ -32,7 +38,10 @@ export const GUIDES = [
   },
   {
     route: '/post-photos-anonymously',
+    kind: 'guide',
+    summary: 'What to check before posting a photo: faces, tattoos, backgrounds, reflections, hidden metadata, and the details that can link your accounts.',
     navLabel: 'Posting photos anonymously',
+    indexTitle: 'How to protect your identity in photos before posting online',
     title: 'How to Protect Your Identity in Photos Before Posting Online',
     description: 'A privacy checklist for posting photos anonymously: faces, tattoos, backgrounds, reflections, EXIF metadata and details that can link your accounts.',
     markdown: postPhotosAnonymously,
@@ -40,6 +49,16 @@ export const GUIDES = [
 ];
 
 export const GUIDE_ROUTES = GUIDES.map((g) => g.route);
+
+// The /guides page: how-to articles first (kind 'guide'), then the tool
+// pages (kind 'tool'). A new article only needs an entry in GUIDES above.
+export const GUIDES_INDEX = {
+  route: '/guides',
+  title: 'Photo Privacy Guides & Tools | Redact.ID',
+  description: 'How-to guides for sharing photos without revealing who or where you are, plus the Redact.ID tools for blurring faces, removing tattoos and stripping metadata.',
+  heading: 'Photo privacy guides',
+  intro: 'Practical how-tos for sharing photos without revealing more than you mean to, and the tools that do the work.',
+};
 
 export function getGuide(route) {
   return GUIDES.find((g) => g.route === route) || null;
