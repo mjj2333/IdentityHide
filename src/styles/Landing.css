@@ -635,3 +635,15 @@ a.landing-badge-live:focus-visible {
     transition: none;
   }
 }
+
+/* "Learn more" on a feature card → that tool's own page. */
+.landing-card-link {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent);
+  text-decoration: none;
+}
+.landing-card-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+

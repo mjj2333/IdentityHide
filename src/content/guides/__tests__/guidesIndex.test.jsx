@@ -50,12 +50,23 @@ describe('guides index (/guides)', () => {
 });
 
 describe('where Guides is linked', () => {
-  it('homepage footer: a Guides link plus the three tool pages, the how-to now sits under Guides', () => {
+  it('homepage footer: one Guides link, no separate tool or article links (they are on the Guides page)', () => {
     const { container } = render(<LandingScreen onEnter={() => {}} />);
     const hrefs = [...container.querySelectorAll('.landing-footer-links a')].map((a) => a.getAttribute('href'));
     expect(hrefs).toContain('/guides');
-    expect(hrefs).toEqual(expect.arrayContaining(['/face-blur-app', '/remove-exif-data', '/tattoo-removal-app']));
-    expect(hrefs).not.toContain('/post-photos-anonymously');
+    for (const r of ['/face-blur-app', '/remove-exif-data', '/tattoo-removal-app', '/post-photos-anonymously']) expect(hrefs).not.toContain(r);
+  });
+
+  it('homepage feature cards link to their tool pages, keeping those one click from the homepage', () => {
+    const { container } = render(<LandingScreen onEnter={() => {}} />);
+    const cardLink = (title) => [...container.querySelectorAll('.landing-card')]
+      .find((c) => c.querySelector('.landing-card-title').textContent.startsWith(title))
+      ?.querySelector('a.landing-card-link')?.getAttribute('href');
+    expect(cardLink('Auto face detection')).toBe('/face-blur-app');
+    expect(cardLink('Strip location & metadata')).toBe('/remove-exif-data');
+    expect(cardLink('AI tattoo removal')).toBe('/tattoo-removal-app');
+    expect(cardLink('Batch mode')).toBeUndefined();
+    container.querySelectorAll('a.landing-card-link').forEach((a) => expect(a.getAttribute('aria-label')).toMatch(/^Learn more about /));
   });
 
   it('is NOT linked from the app start screen (homepage only, for now)', () => {

@@ -31,6 +31,7 @@ const FEATURES = [
   },
   {
     title: 'Auto face detection',
+    href: '/face-blur-app',
     body: 'On-device AI finds every face in your photo so you can hide them all in a single tap.',
     icon: (
       <>
@@ -46,6 +47,7 @@ const FEATURES = [
   },
   {
     title: 'Strip location & metadata',
+    href: '/remove-exif-data',
     body: 'Remove GPS coordinates, device details, and timestamps hidden in your photos before you post.',
     icon: (
       <>
@@ -56,6 +58,7 @@ const FEATURES = [
   },
   {
     title: 'AI tattoo removal',
+    href: '/tattoo-removal-app',
     body: 'Paint over an identifying tattoo and let AI rebuild the skin underneath. Free users get 3 per week, plus more by watching ads; unlimited with Premium.',
     premium: true,
     icon: (
@@ -361,6 +364,13 @@ export default function LandingScreen({ onEnter }) {
                   {f.premium && <span className="landing-tag">Premium</span>}
                 </h3>
                 <p className="landing-card-body">{f.body}</p>
+                {/* The tool's own page (src/content/guides). Linked here, where the
+                    feature is described, rather than as loose footer links. */}
+                {f.href && (
+                  <a className="landing-card-link" href={f.href} aria-label={`Learn more about ${f.title.toLowerCase()}`}>
+                    Learn more <span aria-hidden="true">→</span>
+                  </a>
+                )}
               </div>
             ))}
           </div>
@@ -460,9 +470,6 @@ export default function LandingScreen({ onEnter }) {
             <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
             <a href="/faq">FAQ</a>
-            <a href="/face-blur-app">Face blur</a>
-            <a href="/remove-exif-data">Remove EXIF data</a>
-            <a href="/tattoo-removal-app">Tattoo removal</a>
             <a href="/guides">Guides</a>
             <a href="/feedback">Feedback</a>
           </nav>
