@@ -82,7 +82,7 @@
     <!-- AppLixir rewarded video ads -->
     <div id="applixir-ad"></div>
     <script>
-      // GPP (Global Privacy Platform) stub — AppLixir's ad stack expects
+      // GPP (Global Privacy Platform) stub, AppLixir's ad stack expects
       // this to exist. Without it the SDK throws a TypeError.
       if (typeof window.__gpp !== 'function') {
         window.__gpp = function() {};
@@ -91,7 +91,7 @@
     <!-- async: don't block HTML parsing while this third-party SDK downloads.
          AppLixir is only invoked when the user taps "Watch ad" inside the
          PaywallModal, which can't fire until after the React app mounts and
-         the user interacts — so by the time we need the SDK it's long since
+         the user interacts, so by the time we need the SDK it's long since
          loaded. rewardedAd.js logs a warning + skips gracefully if the SDK
          isn't ready, so racey cases are non-fatal. -->
     <script type="text/javascript" async src="https://cdn.applixir.com/applixir.app.v6.0.1.js"></script>
@@ -106,7 +106,7 @@
       });
     </script>
     <script>
-      // Debug toggles — independent of each other, persisted per-tab:
+      // Debug toggles, independent of each other, persisted per-tab:
       //   ?debug=1 → load Eruda (floating DevTools console for mobile).
       //   ?panel=1 → show the in-app [ClickadillaAd]/[vast-proxy] log
       //     panel at the bottom of the screen.
@@ -123,7 +123,7 @@
           s.src = 'https://cdn.jsdelivr.net/npm/eruda';
           s.onload = function() { try { window.eruda && window.eruda.init(); } catch (e) {} };
           document.head.appendChild(s);
-        } catch (e) { /* sessionStorage unavailable — no debug console */ }
+        } catch (e) { /* sessionStorage unavailable, no debug console */ }
       })();
     </script>
     <script type="module" src="/src/main.jsx"></script>
