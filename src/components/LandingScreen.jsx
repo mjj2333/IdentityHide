@@ -23,7 +23,7 @@ function StickerGlyph({ name, className }) {
 
 const FEATURES = [
   {
-    title: 'Private by design',
+    title: 'Runs on your device',
     body: 'Face blur, stickers, and metadata stripping run entirely in your browser. Your photos never leave your device.',
     icon: (
       <path d="M12 2.5l7 3v5.5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V5.5l7-3z" />
@@ -86,7 +86,7 @@ const PROOF = [
 ];
 
 const STEPS = [
-  { n: '1', title: 'Upload', body: 'Drop in a photo. It opens directly in your browser, with no upload and no account.' },
+  { n: '1', title: 'Choose a photo', body: 'It opens in your browser. Nothing is uploaded, and there is no account to create.' },
   { n: '2', title: 'Redact', body: 'Auto-detect faces, paint freehand, or place a sticker. Metadata is stripped in the same pass.' },
   { n: '3', title: 'Export', body: 'Save the clean, redacted image. The original, and everything hidden in it, stays with you.' },
 ];
@@ -341,9 +341,9 @@ export default function LandingScreen({ onEnter }) {
         {/* Features */}
         <section className="landing-section" id="features">
           <SectionHead
-            eyebrow="Toolkit"
-            title="Everything you need to disappear from a photo"
-            sub="Six tools, one pass, and nothing to configure."
+            eyebrow="Features"
+            title="Hide faces, tattoos and location data"
+            sub="Six tools in one editor. Use as many as the photo needs."
           />
           <div className="landing-grid">
             {FEATURES.map((f, i) => (
@@ -379,9 +379,9 @@ export default function LandingScreen({ onEnter }) {
         {/* How it works */}
         <section className="landing-section landing-how" id="how">
           <SectionHead
-            eyebrow="Workflow"
-            title="Three steps. Zero uploads."
-            sub="From camera roll to clean image in under a minute."
+            eyebrow="How it works"
+            title="Choose a photo, hide what you want, save it"
+            sub="Most photos take less than a minute."
           />
           <div className="landing-steps">
             {STEPS.map((s, i) => (
@@ -398,7 +398,7 @@ export default function LandingScreen({ onEnter }) {
         <section className="landing-section landing-uses-section">
           <SectionHead
             eyebrow="Use cases"
-            title="Built for real life"
+            title="Who it is for"
             sub="Wherever a photo says more than you meant to share."
           />
           <div className="landing-uses">
@@ -420,8 +420,8 @@ export default function LandingScreen({ onEnter }) {
 
         {/* CTA band */}
         <section className="landing-band landing-reveal">
-          <h2 className="landing-band-title">Ready to redact?</h2>
-          <p className="landing-band-sub">Free, private, and works right in your browser.</p>
+          <h2 className="landing-band-title">Try it on one of your photos</h2>
+          <p className="landing-band-sub">Face blur and metadata removal are free. No account needed.</p>
           <div className="landing-cta-row landing-cta-center">
             <button className="landing-btn landing-btn-primary" onClick={() => enter('band')}>
               Try it free
@@ -438,7 +438,7 @@ export default function LandingScreen({ onEnter }) {
 
         {/* FAQ */}
         <section className="landing-section" id="faq">
-          <SectionHead eyebrow="FAQ" title="Questions, answered" />
+          <SectionHead eyebrow="FAQ" title="Common questions" />
           <div className="landing-faq landing-reveal">
             {FAQS.map((item, i) => {
               const open = openFaq === i;

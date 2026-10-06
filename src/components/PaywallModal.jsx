@@ -55,7 +55,7 @@ export default function PaywallModal({ onClose, onEarnedCredit, onRedeemClick, o
         track('credit_earned');
         onEarnedCredit?.();
       } else {
-        setError('Ad was not completed — no credit earned.');
+        setError('The ad was not completed, so no credit was earned.');
       }
     } catch (err) {
       console.warn('[Paywall] rewarded ad failed:', err.message);

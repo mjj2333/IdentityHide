@@ -10,7 +10,7 @@ import { useDocumentMeta } from '../hooks/useDocumentMeta';
  */
 export default function PrivacyScreen({ onBack }) {
   useDocumentMeta({
-    title: 'Privacy Policy — Redact.ID',
+    title: 'Privacy Policy | Redact.ID',
     description: 'Privacy policy for Redact.ID. Face blur and metadata stripping run in your browser. Only AI tattoo removal sends your image to our server, used solely to return your result, never shared or used to train AI.',
     canonical: 'https://redactid.app/privacy',
     // Swap to /og/privacy.png once a per-route image is designed.
@@ -70,9 +70,9 @@ export default function PrivacyScreen({ onBack }) {
           <h2>4. Local Storage</h2>
           <p>
             To let you resume interrupted work, Redact.ID stores a temporary
-            copy of your in-progress session &mdash; your image, any mask edits
+            copy of your in-progress session (your image, any mask edits
             and blur settings, and the face-detection coordinates used to draw
-            those edits &mdash; in your browser&apos;s local storage
+            those edits) in your browser&apos;s local storage
             (IndexedDB). This data:
           </p>
           <ul>
@@ -95,7 +95,7 @@ export default function PrivacyScreen({ onBack }) {
             <li>Event names (e.g., image_uploaded, apply_clicked)</li>
             <li>Device class (mobile vs. desktop), screen size, browser</li>
             <li>The page you came from (HTTP Referer)</li>
-            <li>Your IP address &mdash; transient, used only for rate-limiting and abuse prevention; not stored alongside long-term analytics</li>
+            <li>Your IP address: transient, used only for rate-limiting and abuse prevention; not stored alongside long-term analytics</li>
           </ul>
           <p>
             Analytics never include your images, image content, EXIF data, or
@@ -128,21 +128,21 @@ export default function PrivacyScreen({ onBack }) {
           </p>
           <ul>
             <li>
-              <strong>Netlify</strong> &mdash; hosts the web application and
+              <strong>Netlify</strong>: hosts the web application and
               serverless functions; access logs include IP addresses.{' '}
               <a href="https://www.netlify.com/privacy/" target="_blank" rel="noopener noreferrer">
                 Netlify&apos;s Privacy Policy
               </a>.
             </li>
             <li>
-              <strong>Cloudflare</strong> &mdash; provides the secure tunnel
+              <strong>Cloudflare</strong>: provides the secure tunnel
               between your browser and our tattoo-removal processing server.{' '}
               <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener noreferrer">
                 Cloudflare&apos;s Privacy Policy
               </a>.
             </li>
             <li>
-              <strong>Supabase</strong> &mdash; database that stores
+              <strong>Supabase</strong>: database that stores
               pseudonymous analytics events, promo-code redemption counts,
               email-based subscription state, and feedback you submit.{' '}
               <a href="https://supabase.com/privacy" target="_blank" rel="noopener noreferrer">
@@ -150,7 +150,7 @@ export default function PrivacyScreen({ onBack }) {
               </a>.
             </li>
             <li>
-              <strong>Sentry</strong> &mdash; crash and error reporting. Crash
+              <strong>Sentry</strong>: crash and error reporting. Crash
               events include browser metadata and stack traces but are not tied
               to your identity unless you submit feedback that includes
               personal info.{' '}
@@ -159,7 +159,7 @@ export default function PrivacyScreen({ onBack }) {
               </a>.
             </li>
             <li>
-              <strong>AppLixir</strong> &mdash; rewarded-video ad provider.
+              <strong>AppLixir</strong>: rewarded-video ad provider.
               When you watch a rewarded ad to earn an extra tattoo-removal
               credit, AppLixir loads in an embedded player and may collect
               device and ad-interaction data.{' '}
@@ -168,10 +168,10 @@ export default function PrivacyScreen({ onBack }) {
               </a>.
             </li>
             <li>
-              <strong>Stripe</strong> &mdash; payment processor for
+              <strong>Stripe</strong>: payment processor for
               subscriptions. Currently dormant; activates only if
               you start a checkout. When active, Stripe collects payment and
-              billing details directly &mdash; we never see your card number.{' '}
+              billing details directly. We never see your card number.{' '}
               <a href="https://stripe.com/privacy" target="_blank" rel="noopener noreferrer">
                 Stripe&apos;s Privacy Policy
               </a>.

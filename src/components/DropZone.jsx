@@ -73,8 +73,8 @@ const FooterIcons = {
 
 export default function DropZone() {
   useDocumentMeta({
-    title: 'Redact.ID — Blur faces, remove tattoos, strip location from photos',
-    description: 'Redact.ID protects identities in photos — blur faces, remove tattoos, and strip location metadata in your browser before you share. Free and private.',
+    title: 'Redact.ID: Blur faces, remove tattoos, strip location from photos',
+    description: 'Blur faces, remove tattoos, and strip location metadata from photos in your browser before you share them. Free and private.',
     canonical: 'https://redactid.app/',
     ogImage: 'https://redactid.app/og-image.png',
   });
@@ -282,7 +282,7 @@ export default function DropZone() {
     } catch (e) {
       console.warn('[sessionStore] restore failed:', e?.message || e);
       setSavedSession(null);
-      setWarning({ message: 'Couldn\'t restore your previous session — the saved data may be corrupt. Starting fresh.', sticky: true });
+      setWarning({ message: 'Couldn\'t restore your previous session. The saved data may be corrupt, so a fresh one was started.', sticky: true });
       clearSession().catch(() => {});
     } finally {
       setRestoring(false);

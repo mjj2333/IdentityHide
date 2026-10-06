@@ -81,7 +81,7 @@ export default function AccountScreen({ onBack }) {
             <p>
               {canPurchase
                 ? 'Go Premium for unlimited tattoo removal, full batch processing, and an ad-free experience.'
-                : 'Redact.ID is free to use — unlimited face blur, redaction stickers, and metadata stripping. Earn AI tattoo-removal credits any time by watching a short ad.'}
+                : 'Redact.ID is free to use, with unlimited face blur, redaction stickers, and metadata stripping. Earn AI tattoo-removal credits any time by watching a short ad.'}
             </p>
             <div className="account-actions">
               {canPurchase && (
@@ -142,7 +142,7 @@ export default function AccountScreen({ onBack }) {
                   premium
                     ? (
                       <span className="account-status account-status-active">
-                        {source === 'beta' ? 'Active — promo' : 'Active'}
+                        {source === 'beta' ? 'Active (promo)' : 'Active'}
                       </span>
                     )
                     : <span className="account-status account-status-inactive">Inactive</span>
@@ -275,7 +275,7 @@ export default function AccountScreen({ onBack }) {
           <ConfirmModal
             message={
               email
-                ? `Permanently delete your account? Any subscription on this email is cancelled immediately${premium && source === 'stripe' && expiryText ? ` — you lose the Premium you have paid for until ${expiryText}, with no refund` : ' (the rest of the billing period is not refunded)'}, and your data on our servers is removed. This cannot be undone. To keep Premium until then, cancel the subscription instead.`
+                ? `Permanently delete your account? Any subscription on this email is cancelled immediately${premium && source === 'stripe' && expiryText ? `. You lose the Premium you have paid for until ${expiryText}, with no refund` : ' (the rest of the billing period is not refunded)'}, and your data on our servers is removed. This cannot be undone. To keep Premium until then, cancel the subscription instead.`
                 : 'Permanently delete your account? Your promo code will be removed from this device. This cannot be undone.'
             }
             confirmLabel={deleting ? 'Deleting…' : 'Delete account'}

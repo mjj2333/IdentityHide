@@ -10,7 +10,7 @@ import { useDocumentMeta } from '../hooks/useDocumentMeta';
  */
 export default function TermsScreen({ onBack }) {
   useDocumentMeta({
-    title: 'Terms of Service — Redact.ID',
+    title: 'Terms of Service | Redact.ID',
     description: 'Terms of service for Redact.ID, the in-browser photo redaction tool that blurs faces, removes tattoos, and strips location metadata.',
     canonical: 'https://redactid.app/terms',
     // Swap to /og/terms.png once a per-route image is designed.

@@ -23,13 +23,13 @@ const FAQ_DATA = [
           <>
             <p>AI is used for two key functions:</p>
             <ul>
-              <li>Face detection and blurring — runs entirely in your browser using a small on-device model</li>
-              <li>Tattoo removal — your image is sent to our processing server, where AI inpainting fills in the area you marked and returns the result; we use it only to produce that result, never to train AI or share it</li>
+              <li>Face detection and blurring: runs entirely in your browser using a small on-device model</li>
+              <li>Tattoo removal: your image is sent to our processing server, where AI inpainting fills in the area you marked and returns the result; we use it only to produce that result, never to train AI or share it</li>
             </ul>
-            <p>Everything else — mask editing, metadata stripping, and export — stays on your device.</p>
+            <p>Mask editing, metadata stripping, and export all stay on your device.</p>
           </>
         ),
-        aHtml: '<p>AI is used for two key functions:</p><ul><li>Face detection and blurring — runs entirely in your browser using a small on-device model</li><li>Tattoo removal — your image is sent to our processing server, where AI inpainting fills in the area you marked and returns the result; we use it only to produce that result, never to train AI or share it</li></ul><p>Everything else — mask editing, metadata stripping, and export — stays on your device.</p>',
+        aHtml: '<p>AI is used for two key functions:</p><ul><li>Face detection and blurring: runs entirely in your browser using a small on-device model</li><li>Tattoo removal: your image is sent to our processing server, where AI inpainting fills in the area you marked and returns the result; we use it only to produce that result, never to train AI or share it</li></ul><p>Mask editing, metadata stripping, and export all stay on your device.</p>',
       },
       {
         q: 'What do I get with the premium plan?',
@@ -147,8 +147,8 @@ function FaqItem({ question, answer }) {
 
 export default function FaqScreen({ onBack }) {
   useDocumentMeta({
-    title: 'FAQ — Redact.ID',
-    description: 'Common questions about Redact.ID — how face blur, tattoo removal, and metadata stripping work, what stays on your device, and how the privacy model is enforced.',
+    title: 'FAQ | Redact.ID',
+    description: 'Common questions about Redact.ID: how face blur, tattoo removal, and metadata stripping work, what stays on your device, and what is sent to our server.',
     canonical: 'https://redactid.app/faq',
     // Swap to /og/faq.png once a per-route image is designed.
     ogImage: 'https://redactid.app/og-image.png',
