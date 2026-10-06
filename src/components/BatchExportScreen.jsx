@@ -5,7 +5,8 @@ import { buildBatchZip, applyBatchBlur, hasPaintedPixels, prepareImage } from '.
 import { canvasToBlob, downloadBlob } from '../utils/imageHelpers';
 import { track } from '../utils/analytics';
 import { isNativeApp } from '../utils/platform';
-import { shareNativeFile } from '../utils/nativeMedia';
+import { saveNativeFile } from '../utils/nativeMedia';
+import { savedMessage, isCancelError } from '../utils/exportMessages';
 import ScreenShell from './ScreenShell';
 
 const FORMATS = [
@@ -22,6 +23,8 @@ export default function BatchExportScreen({ onDone, onBack }) {
   const [downloading, setDownloading] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
+  // Result of the last save: { text, error }. Native only; the browser shows its own download UI.
+  const [notice, setNotice] = useState(null);
 
   const doneImages = images.filter(img => img.status === 'done' || img.status === 'edited' || img.outputCanvas);
   const facesBlurred = images.filter(img => (img.detections?.length || 0) > 0).length;
@@ -80,13 +83,13 @@ export default function BatchExportScreen({ onDone, onBack }) {
   // Multi-image "save all" flow.
   //   - Web (iOS Safari): Web Share API with multiple File objects. iOS Photos
   //     accepts the whole batch in one share sheet.
-  //   - Native: loop through images, opening the OS share sheet once per
-  //     image. Capacitor's @capacitor/share takes a single URL, so a batched
-  //     share isn't possible — but landing each image in Photos individually
-  //     is the right semantic for "Save N to Photos".
+  //   - Native Android: each image is written straight into the gallery.
+  //   - Native iOS: the OS share sheet opens once per image. Capacitor's
+  //     @capacitor/share takes a single URL, so a batched share isn't possible.
   const handleShareAll = useCallback(async () => {
     if (!canShare || doneImages.length === 0) return;
     setSharing(true);
+    setNotice(null);
     track('batch_export_share', { count: doneImages.length, format });
 
     try {
@@ -94,15 +97,29 @@ export default function BatchExportScreen({ onDone, onBack }) {
       const ext = format === 'jpg' ? 'jpg' : format;
 
       if (isNative) {
+        let saved = 0;
+        let failed = 0;
+        let folder = null;
         for (const img of doneImages) {
           const canvas = await ensureOutputCanvas(img);
-          if (!canvas) continue;
-          const blob = await canvasToBlob(canvas, mime, quality / 100);
-          const stem = img.file?.name?.replace(/\.[^.]+$/, '') || 'image';
-          const filename = `${stem}_protected.${ext}`;
-          // If the user cancels mid-loop, abort the rest — they're done.
-          const { shared } = await shareNativeFile(blob, filename, mime);
-          if (!shared) break;
+          if (!canvas) { failed++; continue; }
+          try {
+            const blob = await canvasToBlob(canvas, mime, quality / 100);
+            const stem = img.file?.name?.replace(/\.[^.]+$/, '') || 'image';
+            const filename = `${stem}_protected.${ext}`;
+            const result = await saveNativeFile(blob, filename, mime);
+            // If the user cancels mid-loop, abort the rest — they're done.
+            if (result.outcome === 'cancelled') break;
+            if (result.outcome === 'saved') { saved++; folder = result.folder; }
+          } catch (err) {
+            console.warn('[BatchExport] Save failed for', img.file?.name, err);
+            failed++;
+          }
+        }
+        if (failed > 0) {
+          setNotice({ error: true, text: `${failed} of ${doneImages.length} photos could not be saved. Please try again.` });
+        } else if (saved > 0) {
+          setNotice({ text: savedMessage(saved, folder) });
         }
         return;
       }
@@ -163,6 +180,7 @@ export default function BatchExportScreen({ onDone, onBack }) {
   // <a download> doesn't have a filesystem destination on iOS/Android.
   const handleDownloadZip = useCallback(async () => {
     setDownloading(true);
+    setNotice(null);
     track('batch_export_zip', { count: doneImages.length, format });
     try {
       // Pre-generate outputCanvas for any 'edited' images so buildBatchZip
@@ -175,12 +193,14 @@ export default function BatchExportScreen({ onDone, onBack }) {
       const zipBlob = await buildBatchZip(imagesForZip, format, quality / 100);
       const zipName = `redactid_batch_${Date.now().toString(36)}.zip`;
       if (isNative) {
-        await shareNativeFile(zipBlob, zipName, 'application/zip');
+        const result = await saveNativeFile(zipBlob, zipName, 'application/zip');
+        if (result.outcome === 'saved') setNotice({ text: savedMessage(1, result.folder) });
       } else {
         downloadBlob(zipBlob, zipName);
       }
     } catch (err) {
       console.error('[BatchExport] Zip failed:', err);
+      if (isNative && !isCancelError(err)) setNotice({ error: true, text: 'The ZIP could not be saved. Please try again.' });
     } finally {
       setDownloading(false);
     }
@@ -188,6 +208,7 @@ export default function BatchExportScreen({ onDone, onBack }) {
 
   const handleDownloadOne = useCallback(async (img) => {
     setDownloadingId(img.id);
+    setNotice(null);
     // Also set the shared `downloading` flag so the ZIP and Save-All buttons
     // disable during a single-item download — prevents the user triggering a
     // concurrent bulk operation on the same canvases mid-download.
@@ -200,12 +221,14 @@ export default function BatchExportScreen({ onDone, onBack }) {
       const stem = img.file?.name?.replace(/\.[^.]+$/, '') || 'image';
       const filename = `${stem}_protected.${format === 'jpg' ? 'jpg' : format}`;
       if (isNative) {
-        await shareNativeFile(blob, filename, mime);
+        const result = await saveNativeFile(blob, filename, mime);
+        if (result.outcome === 'saved') setNotice({ text: savedMessage(1, result.folder) });
       } else {
         downloadBlob(blob, filename);
       }
     } catch (err) {
       console.error('[BatchExport] Single download failed:', err);
+      if (isNative && !isCancelError(err)) setNotice({ error: true, text: 'That photo could not be saved. Please try again.' });
     } finally {
       setDownloadingId(null);
       setDownloading(false);
@@ -249,8 +272,14 @@ export default function BatchExportScreen({ onDone, onBack }) {
         )}
       </div>
 
+      {notice && (
+        <div className={notice.error ? 'export-error-msg' : 'export-saved-msg'} role={notice.error ? 'alert' : 'status'}>
+          {notice.text}
+        </div>
+      )}
+
       <div className="batch-actions">
-        {/* iOS: Save to Photos via share sheet */}
+        {/* Native apps and iOS Safari: save to Photos */}
         {canShare && (
           <button
             className="btn btn-primary btn-lg"

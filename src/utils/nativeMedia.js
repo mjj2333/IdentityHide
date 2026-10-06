@@ -4,7 +4,7 @@
 //
 // All exported functions throw if called from a web context — callers should
 // branch on `isNativeApp()` first and only invoke these on native.
-import { isNativeApp } from './platform';
+import { isNativeApp, getNativePlatform } from './platform';
 
 function assertNative() {
   if (!isNativeApp()) {
@@ -116,6 +116,75 @@ export async function shareNativeFile(blob, filename, mimeType) {
       await Filesystem.deleteFile({ path: filename, directory: Directory.Cache });
     } catch {}
   }
+}
+
+// Public folders the Android app saves into. Photos go under Pictures so the
+// phone's gallery shows them; anything else (the batch ZIP) goes to Downloads.
+const ANDROID_PHOTO_FOLDER = 'Pictures/RedactID';
+const ANDROID_FILE_FOLDER = 'Download/RedactID';
+
+function withUniqueSuffix(filename) {
+  const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const dot = filename.lastIndexOf('.');
+  return dot > 0 ? `${filename.slice(0, dot)}_${token}${filename.slice(dot)}` : `${filename}_${token}`;
+}
+
+/**
+ * Saves a file where the user will find it.
+ *
+ * Android: written straight into the public Pictures (or Download) folder.
+ * The Android share sheet has no "save to device" target (only uploads such
+ * as Google Photos or Drive), so sharing alone left people with no way to
+ * keep the result on their phone. Android 11+ lets an app create its own
+ * files in these folders without a permission; on older versions the write
+ * is refused and we fall back to the share sheet.
+ *
+ * iOS: the share sheet, which offers "Save Image".
+ *
+ * @returns {Promise<{ outcome: 'saved', folder: string } | { outcome: 'shared' } | { outcome: 'cancelled' }>}
+ */
+export async function saveNativeFile(blob, filename, mimeType) {
+  assertNative();
+  if (getNativePlatform() === 'android') {
+    try {
+      const folder = await writeToAndroidPublicFolder(blob, filename, mimeType);
+      return { outcome: 'saved', folder };
+    } catch (err) {
+      console.warn('[nativeMedia] direct save failed, using the share sheet:', err);
+    }
+  }
+  const { shared } = await shareNativeFile(blob, filename, mimeType);
+  return { outcome: shared ? 'shared' : 'cancelled' };
+}
+
+async function writeToAndroidPublicFolder(blob, filename, mimeType) {
+  const { Filesystem, Directory } = await import('@capacitor/filesystem');
+  const folder = /^image\//.test(mimeType || '') ? ANDROID_PHOTO_FOLDER : ANDROID_FILE_FOLDER;
+  const data = await blobToBase64(blob);
+  const write = (name) => Filesystem.writeFile({
+    path: `${folder}/${name}`,
+    data,
+    directory: Directory.ExternalStorage,
+    recursive: true,
+  });
+
+  // writeFile replaces an existing file, so never reuse a taken name.
+  let name = filename;
+  try {
+    await Filesystem.stat({ path: `${folder}/${name}`, directory: Directory.ExternalStorage });
+    name = withUniqueSuffix(filename);
+  } catch {
+    // Not there yet: the name is free.
+  }
+
+  try {
+    await write(name);
+  } catch {
+    // A file of that name left by an earlier install is invisible to stat but
+    // still blocks the write. One retry under a fresh name covers it.
+    await write(withUniqueSuffix(filename));
+  }
+  return folder;
 }
 
 function base64ToUint8Array(b64) {

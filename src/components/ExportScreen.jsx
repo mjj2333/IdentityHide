@@ -3,8 +3,9 @@ import { usePipeline } from '../context/PipelineContext';
 import { useImagePipeline } from '../hooks/useImagePipeline';
 import { canvasToBlob, downloadBlob, generateExportFilename } from '../utils/imageHelpers';
 import { track } from '../utils/analytics';
-import { isNativeApp } from '../utils/platform';
-import { shareNativeFile } from '../utils/nativeMedia';
+import { isNativeApp, getNativePlatform } from '../utils/platform';
+import { shareNativeFile, saveNativeFile } from '../utils/nativeMedia';
+import { savedMessage, isCancelError } from '../utils/exportMessages';
 import { useZoomPan } from '../hooks/useZoomPan';
 import { useCoachMarks, suppressAllWalkthroughs } from '../hooks/useCoachMarks';
 import { useFocusTrap } from '../hooks/useFocusTrap';
@@ -18,7 +19,7 @@ import CoachMark from './CoachMark';
  * and safe-default focus on the dismiss button so accidental Enter doesn't
  * discard the user's just-exported work.
  */
-function FeedbackPrompt({ onEditAnother, onDismiss, onGiveFeedback }) {
+function FeedbackPrompt({ onEditAnother, onDismiss, onGiveFeedback, savedNote }) {
   const modalRef = useRef(null);
   const dismissRef = useRef(null);
   const previouslyFocusedRef = useRef(null);
@@ -53,6 +54,7 @@ function FeedbackPrompt({ onEditAnother, onDismiss, onGiveFeedback }) {
         aria-describedby="feedback-prompt-text"
         onClick={(e) => e.stopPropagation()}
       >
+        {savedNote && <p className="feedback-prompt-saved">{savedNote}</p>}
         <p className="feedback-prompt-title" id="feedback-prompt-title">What&apos;s next?</p>
         <div className="feedback-prompt-actions">
           {/* "Return to Export" is the visual primary to match the auto-focused
@@ -121,6 +123,9 @@ export default function ExportScreen({ onFeedback }) {
   const [fileSize, setFileSize] = useState(null);
   const [showFeedbackPrompt, setShowFeedbackPrompt] = useState(false);
   const [exportError, setExportError] = useState(null);
+  const [savedNote, setSavedNote] = useState(null);
+  // The Android app saves straight to the gallery, so sharing gets its own button.
+  const isAndroidApp = getNativePlatform() === 'android';
 
   // Whether the "Share" affordance should appear instead of just download:
   //   - Native shell: always (the OS share sheet is the right primitive)
@@ -233,7 +238,11 @@ export default function ExportScreen({ onFeedback }) {
     }
   }, [format, quality, buildExportOutput]);
 
-  const handleShare = useCallback(async () => {
+  const handleShare = useCallback(async ({ shareOnly = false } = {}) => {
+    const native = isNativeApp();
+    setExportError(null);
+    setSavedNote(null);
+    if (native) setDownloading(true);
     try {
       const fullResOutput = await buildExportOutput();
       if (!fullResOutput) return;
@@ -241,11 +250,16 @@ export default function ExportScreen({ onFeedback }) {
       const ext = format === 'jpeg' ? 'jpg' : format;
       const blob = await canvasToBlob(fullResOutput, mimeType, quality / 100);
       const filename = generateExportFilename(ext);
-      if (isNativeApp()) {
-        const { shared } = await shareNativeFile(blob, filename, mimeType);
-        if (shared) {
-          track('export_completed', { format, quality, action: 'share' });
-          if (mountedRef.current) setShowFeedbackPrompt(true);
+      if (native) {
+        const result = shareOnly
+          ? { outcome: (await shareNativeFile(blob, filename, mimeType)).shared ? 'shared' : 'cancelled' }
+          : await saveNativeFile(blob, filename, mimeType);
+        if (result.outcome !== 'cancelled') {
+          track('export_completed', { format, quality, action: result.outcome === 'saved' ? 'save' : 'share' });
+          if (mountedRef.current) {
+            if (result.outcome === 'saved') setSavedNote(savedMessage(1, result.folder));
+            setShowFeedbackPrompt(true);
+          }
         }
         return;
       }
@@ -256,8 +270,14 @@ export default function ExportScreen({ onFeedback }) {
         track('export_completed', { format, quality, action: 'share' });
         if (mountedRef.current) setShowFeedbackPrompt(true);
       }
-    } catch {
-      // User cancelled share or share API failed
+    } catch (err) {
+      // Dismissing the share sheet is not a failure. Anything else is, and
+      // the user needs to know the photo was not saved.
+      if (isCancelError(err)) return;
+      console.error('Save failed:', err);
+      if (mountedRef.current) setExportError('Your photo could not be saved. Please try again.');
+    } finally {
+      if (native && mountedRef.current) setDownloading(false);
     }
   }, [format, quality, buildExportOutput]);
 
@@ -321,13 +341,14 @@ export default function ExportScreen({ onFeedback }) {
       )}
 
       {exportError && <div className="export-error-msg" role="alert">{exportError}</div>}
+      {savedNote && !exportError && <div className="export-saved-msg" role="status">{savedNote}</div>}
 
       <div className="export-primary-row">
         <button
           ref={downloadBtnRef}
           type="button"
           className="export-save-btn"
-          onClick={canShare ? handleShare : handleDownload}
+          onClick={canShare ? () => handleShare() : handleDownload}
           disabled={downloading}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -336,6 +357,18 @@ export default function ExportScreen({ onFeedback }) {
           {downloading ? 'Building…' : (canShare ? 'Save to photos' : 'Download')}
         </button>
       </div>
+      {isAndroidApp && (
+        <div className="export-secondary-row">
+          <button
+            type="button"
+            className="export-share-btn"
+            onClick={() => handleShare({ shareOnly: true })}
+            disabled={downloading}
+          >
+            Share to another app
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -387,6 +420,7 @@ export default function ExportScreen({ onFeedback }) {
           onEditAnother={() => { setShowFeedbackPrompt(false); reset(); }}
           onDismiss={() => setShowFeedbackPrompt(false)}
           onGiveFeedback={() => { setShowFeedbackPrompt(false); onFeedback(); }}
+          savedNote={savedNote}
         />
       )}
 
