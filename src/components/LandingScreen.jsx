@@ -93,23 +93,6 @@ const STEPS = [
 
 const USE_CASES = [
   {
-    title: 'Selling online',
-    body: 'List items without leaking where you live. Strip GPS data and blur anything that gives your home away.',
-    icon: (
-      <>
-        <path d="M20.6 13.3l-7.3 7.3a1.5 1.5 0 0 1-2.1 0l-7.8-7.8V3.5h9.3l7.9 7.7a1.5 1.5 0 0 1 0 2.1z" />
-        <circle cx="8" cy="8" r="1.6" />
-      </>
-    ),
-  },
-  {
-    title: 'Family photos',
-    body: 'Share the moment without sharing your kids’ faces. One tap blurs every face in the shot.',
-    icon: (
-      <path d="M12 20.5s-7.5-4.7-7.5-10A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7.5 3.5c0 5.3-7.5 10-7.5 10z" />
-    ),
-  },
-  {
     title: 'Anonymous creators',
     body: 'Post as your handle, not your legal identity. Hide faces and identifying tattoos before publishing.',
     icon: (
@@ -127,6 +110,23 @@ const USE_CASES = [
         <circle cx="9" cy="8.5" r="3" />
         <path d="M3.5 19.5c0-3 2.5-4.8 5.5-4.8s5.5 1.8 5.5 4.8M15.5 6a3 3 0 0 1 0 5M17.5 14.9c1.8.6 3 1.9 3 3.9" />
       </>
+    ),
+  },
+  {
+    title: 'Selling online',
+    body: 'List items without leaking where you live. Strip GPS data and blur anything that gives your home away.',
+    icon: (
+      <>
+        <path d="M20.6 13.3l-7.3 7.3a1.5 1.5 0 0 1-2.1 0l-7.8-7.8V3.5h9.3l7.9 7.7a1.5 1.5 0 0 1 0 2.1z" />
+        <circle cx="8" cy="8" r="1.6" />
+      </>
+    ),
+  },
+  {
+    title: 'Family photos',
+    body: 'Share the moment without sharing your kids’ faces. One tap blurs every face in the shot.',
+    icon: (
+      <path d="M12 20.5s-7.5-4.7-7.5-10A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7.5 3.5c0 5.3-7.5 10-7.5 10z" />
     ),
   },
 ];
@@ -398,8 +398,8 @@ export default function LandingScreen({ onEnter }) {
         <section className="landing-section landing-uses-section">
           <SectionHead
             eyebrow="Use cases"
-            title="Who it is for"
-            sub="Wherever a photo says more than you meant to share."
+            title="Who is Redact.ID for?"
+            sub="Anyone whose photos might show more than they meant to share."
           />
           <div className="landing-uses">
             {USE_CASES.map((u, i) => (
