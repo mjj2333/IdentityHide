@@ -402,6 +402,7 @@ a.landing-badge-live:focus-visible {
   letter-spacing: -0.02em;
   font-weight: 800;
   text-align: center;
+  text-wrap: balance;
 }
 
 /* Features grid */

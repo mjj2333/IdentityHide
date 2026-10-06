@@ -380,7 +380,7 @@ export default function LandingScreen({ onEnter }) {
         <section className="landing-section landing-how" id="how">
           <SectionHead
             eyebrow="How it works"
-            title="Choose a photo, hide what you want, save it"
+            title="Choose a photo, hide what you want, then save"
             sub="Most photos take less than a minute."
           />
           <div className="landing-steps">
