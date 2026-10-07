@@ -5,8 +5,8 @@
  * isNativeApp() and only calls in the native shell, and the plugin is
  * dynamically imported here so it stays out of the web bundle entirely.
  *
- * SCAFFOLD STATE: uses Google's official TEST ad unit IDs, which always serve
- * test ads with zero policy risk. Before shipping real ads, swap:
+ * iOS uses the real AdMob IDs. Android still uses Google's official TEST ad
+ * unit IDs, which always serve test ads. Before shipping real Android ads, swap:
  *   1. REWARDED_AD_IDS below (per platform), and
  *   2. the AdMob app-id meta-data in the native projects
  *      (android/app/src/main/AndroidManifest.xml APPLICATION_ID, and the iOS
@@ -15,12 +15,12 @@
  */
 import { getNativePlatform } from './platform';
 
-// Google's official TEST rewarded ad units (safe placeholders), one per
-// platform — iOS and Android have distinct unit IDs. getNativePlatform()
-// selects at show time; falls back to Android if platform is unknown.
+// Rewarded ad units, one per platform. iOS is the real unit; Android is still
+// Google's official TEST unit. getNativePlatform() selects at show time and
+// falls back to Android if the platform is unknown.
 const REWARDED_AD_IDS = {
   android: 'ca-app-pub-3940256099942544/5224354917',
-  ios: 'ca-app-pub-3940256099942544/1712485313',
+  ios: 'ca-app-pub-5282264563005092/8560497350',
 };
 
 // Reward-video safety ceiling: if prepare/show stalls, let the user through

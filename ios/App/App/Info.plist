@@ -55,9 +55,9 @@
 	<string>Redact.ID saves your redacted photo back to your library when you tap Save. Originals are never modified.</string>
 	<key>NSUserTrackingUsageDescription</key>
 	<string>Redact.ID uses this to show more relevant ads and support the free tier. Rewarded ads still work if you decline.</string>
-	<!-- iOS AdMob app id: Google's official TEST id (serves test ads, zero policy risk). Swap to the real iOS app id before shipping real ads, alongside REWARDED_AD_IDS.ios in src/utils/admobAds.js. -->
+	<!-- iOS AdMob app id (real). Pairs with REWARDED_AD_IDS.ios in src/utils/admobAds.js. -->
 	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-3940256099942544~1458002511</string>
+	<string>ca-app-pub-5282264563005092~5350925791</string>
 	<!-- Export compliance: Redact.ID uses only standard/exempt encryption
 	     (HTTPS/TLS), so it declares no non-exempt encryption. This clears the
 	     "Missing Compliance" gate automatically on every TestFlight / App Store
