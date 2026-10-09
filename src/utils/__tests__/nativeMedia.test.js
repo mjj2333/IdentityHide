@@ -15,7 +15,7 @@ vi.mock('../platform', () => ({
   getNativePlatform: () => platform.name,
 }));
 
-import { saveNativeFile } from '../nativeMedia';
+import { saveNativeFile, saveNativeBatch } from '../nativeMedia';
 
 const jpeg = () => new Blob(['fake-jpeg-bytes'], { type: 'image/jpeg' });
 const publicWrites = () => fs.writeFile.mock.calls.map(([o]) => o).filter((o) => o.directory === 'EXTERNAL_STORAGE');
@@ -101,5 +101,104 @@ describe('saveNativeFile on iOS', () => {
     share.share.mockRejectedValue(new Error('Share canceled'));
 
     expect(await saveNativeFile(jpeg(), 'img_protected_abc.jpg', 'image/jpeg')).toEqual({ outcome: 'cancelled' });
+  });
+});
+
+describe('saveNativeBatch', () => {
+  const items = (names) => async (i) => ({ blob: jpeg(), filename: names[i], mimeType: 'image/jpeg' });
+  const cacheWrites = () => fs.writeFile.mock.calls.map(([o]) => o).filter((o) => o.directory === 'CACHE');
+
+  describe('on iOS', () => {
+    beforeEach(() => { platform.name = 'ios'; });
+
+    it('opens ONE share sheet holding every photo, not one sheet per photo', async () => {
+      const res = await saveNativeBatch(3, items(['a_protected.jpg', 'b_protected.jpg', 'c_protected.jpg']));
+
+      expect(share.share).toHaveBeenCalledTimes(1);
+      const opts = share.share.mock.calls[0][0];
+      expect(opts.files).toEqual([
+        'file:///x/a_protected.jpg', 'file:///x/b_protected.jpg', 'file:///x/c_protected.jpg',
+      ]);
+      expect(opts.url).toBeUndefined();
+      expect(res).toEqual({ outcome: 'shared', count: 3, failed: 0 });
+    });
+
+    it('keeps photos apart when the picker gave them all the same name', async () => {
+      await saveNativeBatch(3, items(['image_protected.jpg', 'image_protected.jpg', 'image_protected.jpg']));
+
+      const paths = cacheWrites().map((o) => o.path);
+      expect(new Set(paths).size).toBe(3);
+      expect(share.share.mock.calls[0][0].files).toHaveLength(3);
+    });
+
+    it('shares the rest and counts the loss when one photo cannot be produced', async () => {
+      const res = await saveNativeBatch(3, async (i) => {
+        if (i === 1) return null;
+        if (i === 2) throw new Error('encode failed');
+        return { blob: jpeg(), filename: 'a_protected.jpg', mimeType: 'image/jpeg' };
+      });
+
+      expect(share.share.mock.calls[0][0].files).toHaveLength(1);
+      expect(res).toEqual({ outcome: 'shared', count: 1, failed: 2 });
+    });
+
+    it('does not open an empty share sheet when nothing could be produced', async () => {
+      const res = await saveNativeBatch(2, async () => null);
+
+      expect(share.share).not.toHaveBeenCalled();
+      expect(res).toEqual({ outcome: 'shared', count: 0, failed: 2 });
+    });
+
+    it('reports a dismissed sheet as cancelled and cleans up its temp files', async () => {
+      share.share.mockRejectedValue(new Error('Share canceled'));
+
+      const res = await saveNativeBatch(2, items(['a.jpg', 'b.jpg']));
+
+      expect(res).toEqual({ outcome: 'cancelled', count: 0, failed: 0 });
+      expect(fs.deleteFile).toHaveBeenCalledTimes(2);
+    });
+
+    it('surfaces a real share failure instead of hiding it', async () => {
+      share.share.mockRejectedValue(new Error("Can't share while sharing is in progress"));
+
+      await expect(saveNativeBatch(2, items(['a.jpg', 'b.jpg']))).rejects.toThrow('sharing is in progress');
+      expect(fs.deleteFile).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('on Android', () => {
+    it('writes every photo straight into the gallery folder', async () => {
+      const res = await saveNativeBatch(3, items(['a.jpg', 'b.jpg', 'c.jpg']));
+
+      expect(publicWrites().map((o) => o.path)).toEqual([
+        'Pictures/RedactID/a.jpg', 'Pictures/RedactID/b.jpg', 'Pictures/RedactID/c.jpg',
+      ]);
+      expect(share.share).not.toHaveBeenCalled();
+      expect(res).toEqual({ outcome: 'saved', folder: 'Pictures/RedactID', count: 3, failed: 0 });
+    });
+
+    it('counts a photo that fails part-way and carries on', async () => {
+      fs.writeFile.mockImplementation(async ({ path }) => {
+        if (path.includes('/b')) throw new Error('disk error');
+        return { uri: `file:///x/${path}` };
+      });
+
+      const res = await saveNativeBatch(3, items(['a.jpg', 'b.jpg', 'c.jpg']));
+
+      expect(res).toEqual({ outcome: 'saved', folder: 'Pictures/RedactID', count: 2, failed: 1 });
+    });
+
+    it('uses one share sheet for the whole batch when the gallery cannot be written (older Android)', async () => {
+      fs.writeFile.mockImplementation(async ({ directory, path }) => {
+        if (directory === 'EXTERNAL_STORAGE') throw new Error('permission denied');
+        return { uri: `file:///cache/${path}` };
+      });
+
+      const res = await saveNativeBatch(2, items(['a.jpg', 'b.jpg']));
+
+      expect(share.share).toHaveBeenCalledTimes(1);
+      expect(share.share.mock.calls[0][0].files).toHaveLength(2);
+      expect(res).toEqual({ outcome: 'shared', count: 2, failed: 0 });
+    });
   });
 });

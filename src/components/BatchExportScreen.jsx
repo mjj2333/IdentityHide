@@ -5,7 +5,7 @@ import { buildBatchZip, applyBatchBlur, hasPaintedPixels, prepareImage } from '.
 import { canvasToBlob, downloadBlob } from '../utils/imageHelpers';
 import { track } from '../utils/analytics';
 import { isNativeApp } from '../utils/platform';
-import { saveNativeFile } from '../utils/nativeMedia';
+import { saveNativeFile, saveNativeBatch } from '../utils/nativeMedia';
 import { savedMessage, isCancelError } from '../utils/exportMessages';
 import ScreenShell from './ScreenShell';
 
@@ -29,6 +29,8 @@ export default function BatchExportScreen({ onDone, onBack }) {
   const doneImages = images.filter(img => img.status === 'done' || img.status === 'edited' || img.outputCanvas);
   const facesBlurred = images.filter(img => (img.detections?.length || 0) > 0).length;
   const tattoosRemoved = images.filter(img => hasPaintedPixels(img.tattooMaskCanvas)).length;
+  // Photos that failed during processing are left out of every save below.
+  const leftOut = images.filter(img => img.status === 'error' && !img.outputCanvas).length;
 
   // Returns the image's outputCanvas, generating it lazily for 'edited' images
   // that reached this screen without going through processBatchFaceBlur.
@@ -84,8 +86,7 @@ export default function BatchExportScreen({ onDone, onBack }) {
   //   - Web (iOS Safari): Web Share API with multiple File objects. iOS Photos
   //     accepts the whole batch in one share sheet.
   //   - Native Android: each image is written straight into the gallery.
-  //   - Native iOS: the OS share sheet opens once per image. Capacitor's
-  //     @capacitor/share takes a single URL, so a batched share isn't possible.
+  //   - Native iOS: one OS share sheet holding every image ("Save N Images").
   const handleShareAll = useCallback(async () => {
     if (!canShare || doneImages.length === 0) return;
     setSharing(true);
@@ -97,29 +98,19 @@ export default function BatchExportScreen({ onDone, onBack }) {
       const ext = format === 'jpg' ? 'jpg' : format;
 
       if (isNative) {
-        let saved = 0;
-        let failed = 0;
-        let folder = null;
-        for (const img of doneImages) {
+        const total = doneImages.length;
+        const result = await saveNativeBatch(total, async (i) => {
+          const img = doneImages[i];
           const canvas = await ensureOutputCanvas(img);
-          if (!canvas) { failed++; continue; }
-          try {
-            const blob = await canvasToBlob(canvas, mime, quality / 100);
-            const stem = img.file?.name?.replace(/\.[^.]+$/, '') || 'image';
-            const filename = `${stem}_protected.${ext}`;
-            const result = await saveNativeFile(blob, filename, mime);
-            // If the user cancels mid-loop, abort the rest — they're done.
-            if (result.outcome === 'cancelled') break;
-            if (result.outcome === 'saved') { saved++; folder = result.folder; }
-          } catch (err) {
-            console.warn('[BatchExport] Save failed for', img.file?.name, err);
-            failed++;
-          }
-        }
-        if (failed > 0) {
-          setNotice({ error: true, text: `${failed} of ${doneImages.length} photos could not be saved. Please try again.` });
-        } else if (saved > 0) {
-          setNotice({ text: savedMessage(saved, folder) });
+          if (!canvas) return null;
+          const blob = await canvasToBlob(canvas, mime, quality / 100);
+          const stem = img.file?.name?.replace(/\.[^.]+$/, '') || 'image';
+          return { blob, filename: `${stem}_protected.${ext}`, mimeType: mime };
+        });
+        if (result.failed > 0) {
+          setNotice({ error: true, text: `${result.failed} of ${total} photos could not be saved. Please try again.` });
+        } else if (result.outcome === 'saved') {
+          setNotice({ text: savedMessage(result.count, result.folder) });
         }
         return;
       }
@@ -137,9 +128,10 @@ export default function BatchExportScreen({ onDone, onBack }) {
         await navigator.share({ files });
       }
     } catch (err) {
-      // User cancelled or share failed — that's ok
-      if (err.name !== 'AbortError') {
+      // A dismissed share sheet is fine. Anything else means nothing was saved.
+      if (!isCancelError(err)) {
         console.warn('[BatchExport] Share failed:', err);
+        if (isNative) setNotice({ error: true, text: 'Your photos could not be saved. Please try again.' });
       }
     } finally {
       setSharing(false);
@@ -341,6 +333,13 @@ export default function BatchExportScreen({ onDone, onBack }) {
           {tattoosRemoved > 0 ? ` \u2022 ${tattoosRemoved} with tattoos removed` : ''}
           {facesBlurred > 0 ? ` \u2022 ${facesBlurred} with faces blurred` : ''}
         </p>
+        {leftOut > 0 && (
+          <p className="export-error-msg" role="alert">
+            {leftOut === 1
+              ? '1 photo could not be processed and will not be saved.'
+              : `${leftOut} photos could not be processed and will not be saved.`}
+          </p>
+        )}
       </div>
 
       <div className="batch-grid">

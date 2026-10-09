@@ -157,6 +157,105 @@ export async function saveNativeFile(blob, filename, mimeType) {
   return { outcome: shared ? 'shared' : 'cancelled' };
 }
 
+/**
+ * Saves several files in one go ("Save N to Photos").
+ *
+ * Android: each file is written straight into the gallery folder.
+ * iOS: ONE share sheet holding every file, so the user confirms once
+ * ("Save 3 Images"). Opening a sheet per file used to lose photos: the plugin
+ * refuses to present while the previous sheet is still on its way out.
+ *
+ * `getItem(i)` produces item i on demand as { blob, filename, mimeType }, or
+ * null when it cannot be produced, so only one blob is held at a time.
+ *
+ * `count` is how many files were saved or handed to the share sheet.
+ *
+ * @returns {Promise<{ outcome: 'saved'|'shared'|'cancelled', count: number, failed: number, folder?: string }>}
+ */
+export async function saveNativeBatch(total, getItem) {
+  assertNative();
+  const produce = async (i) => {
+    try {
+      return await getItem(i);
+    } catch (err) {
+      console.warn('[nativeMedia] batch item failed:', err);
+      return null;
+    }
+  };
+  if (getNativePlatform() === 'android') {
+    const direct = await saveBatchToAndroidPublicFolder(total, produce);
+    if (direct) return direct;
+  }
+  return shareNativeBatch(total, produce);
+}
+
+// Returns null when the very first write is refused (older Android), so the
+// caller can fall back to the share sheet for the whole batch.
+async function saveBatchToAndroidPublicFolder(total, produce) {
+  let count = 0;
+  let failed = 0;
+  let folder = ANDROID_PHOTO_FOLDER;
+  for (let i = 0; i < total; i++) {
+    const item = await produce(i);
+    if (!item) { failed++; continue; }
+    try {
+      folder = await writeToAndroidPublicFolder(item.blob, item.filename, item.mimeType);
+      count++;
+    } catch (err) {
+      if (count === 0 && failed === 0) {
+        console.warn('[nativeMedia] direct save failed, using the share sheet:', err);
+        return null;
+      }
+      console.warn('[nativeMedia] could not save', item.filename, err);
+      failed++;
+    }
+  }
+  return { outcome: 'saved', folder, count, failed };
+}
+
+async function shareNativeBatch(total, produce) {
+  const [{ Filesystem, Directory }, { Share }] = await Promise.all([
+    import('@capacitor/filesystem'),
+    import('@capacitor/share'),
+  ]);
+
+  const written = [];
+  const uris = [];
+  let failed = 0;
+  try {
+    for (let i = 0; i < total; i++) {
+      const item = await produce(i);
+      if (!item) { failed++; continue; }
+      // Photo-library picks can all carry the same name; keep them apart.
+      const name = written.includes(item.filename) ? withUniqueSuffix(item.filename) : item.filename;
+      const { uri } = await Filesystem.writeFile({
+        path: name,
+        data: await blobToBase64(item.blob),
+        directory: Directory.Cache,
+      });
+      written.push(name);
+      uris.push(uri);
+    }
+    if (uris.length === 0) return { outcome: 'shared', count: 0, failed };
+
+    try {
+      await Share.share({ files: uris, dialogTitle: 'Save or share' });
+    } catch (err) {
+      if (/cancel/i.test(String(err?.message || err))) return { outcome: 'cancelled', count: 0, failed: 0 };
+      throw err;
+    }
+    return { outcome: 'shared', count: uris.length, failed };
+  } finally {
+    for (const name of written) {
+      try {
+        await Filesystem.deleteFile({ path: name, directory: Directory.Cache });
+      } catch {
+        // Best-effort; the OS reclaims the cache directory anyway.
+      }
+    }
+  }
+}
+
 async function writeToAndroidPublicFolder(blob, filename, mimeType) {
   const { Filesystem, Directory } = await import('@capacitor/filesystem');
   const folder = /^image\//.test(mimeType || '') ? ANDROID_PHOTO_FOLDER : ANDROID_FILE_FOLDER;
