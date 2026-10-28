@@ -23,9 +23,16 @@ const REWARDED_AD_IDS = {
   ios: 'ca-app-pub-5282264563005092/8560497350',
 };
 
-// Reward-video safety ceiling: if prepare/show stalls, let the user through
-// with completed:false, matching the AppLixir path's behaviour.
-const AD_TIMEOUT = 45_000;
+// Safety ceilings. Loading gets 45 s; if no ad appears by then the user is let
+// through with completed:false. Once an ad is on screen there is no short
+// limit: rewarded ads often run past 45 s (a 30 s video, an end card, or two
+// ads back to back), and giving up mid-ad threw the reward away and sent the
+// user round the "watch an ad" prompt again and again. The long ceiling only
+// covers an ad that never reports being closed.
+const LOAD_TIMEOUT = 45_000;
+const SHOWING_TIMEOUT = 5 * 60_000;
+// A reward reported a moment after the close still counts.
+const REWARD_GRACE = 500;
 
 let initialized = false;
 
@@ -86,6 +93,7 @@ export async function showAdMobRewarded() {
   return new Promise((resolve) => {
     let earned = false;
     let settled = false;
+    let timer = null;
     const listeners = [];
     const cleanup = async () => {
       for (const l of listeners) { try { await l.remove(); } catch { /* ignore */ } }
@@ -96,21 +104,33 @@ export async function showAdMobRewarded() {
       clearTimeout(timer);
       await cleanup();
       console.log('[admob] rewarded done:', reason, { earned });
-      resolve({ completed: earned, reason });
+      resolve({ completed: earned, reason: earned ? 'rewarded' : reason });
     };
-    const timer = setTimeout(() => done('timeout'), AD_TIMEOUT);
+    const limit = (ms) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => done('timeout'), ms);
+    };
+    limit(LOAD_TIMEOUT);
 
     (async () => {
       try {
         listeners.push(await AdMob.addListener(RewardAdPluginEvents.Rewarded, () => { earned = true; }));
+        listeners.push(await AdMob.addListener(RewardAdPluginEvents.Showed, () => limit(SHOWING_TIMEOUT)));
         // Dismissed fires whether or not the reward was earned; it's the
-        // terminal signal (user closed the ad), so resolve on it.
-        listeners.push(await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => done(earned ? 'rewarded' : 'dismissed')));
+        // terminal signal (user closed the ad). Wait a beat for a reward
+        // that is reported just after it.
+        listeners.push(await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
+          if (earned) done('rewarded');
+          else setTimeout(() => done('dismissed'), REWARD_GRACE);
+        }));
         listeners.push(await AdMob.addListener(RewardAdPluginEvents.FailedToShow, () => done('error:show')));
         listeners.push(await AdMob.addListener(RewardAdPluginEvents.FailedToLoad, () => done('error:load')));
         const adId = REWARDED_AD_IDS[getNativePlatform()] || REWARDED_AD_IDS.android;
         await AdMob.prepareRewardVideoAd({ adId });
-        await AdMob.showRewardVideoAd();
+        // The show call itself resolves with the reward once it is earned
+        // (and never resolves otherwise), on both iOS and Android.
+        const reward = await AdMob.showRewardVideoAd();
+        if (reward) earned = true;
       } catch (err) {
         done('error:' + (err?.message || 'unknown'));
       }
