@@ -23,6 +23,14 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
+describe('SubscribeModal — what Premium covers', () => {
+  it('says before checkout that Premium is for the website, not the phone apps', () => {
+    render(<SubscribeModal onClose={() => {}} />);
+    const note = screen.getByText(/premium works on this website/i);
+    expect(note.textContent).toMatch(/iPhone and Android apps/);
+  });
+});
+
 describe('SubscribeModal — signed in', () => {
   it('passes the signed-in email to checkout and shows no email field', async () => {
     ent.email = 'a@b.c';

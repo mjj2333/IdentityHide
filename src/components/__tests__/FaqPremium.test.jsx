@@ -25,6 +25,16 @@ describe('FAQ premium answer', () => {
     expect(answer).toMatch(/3/);
   });
 
+  it('says Premium covers the website only, not the phone apps', () => {
+    const { container } = render(<FaqScreen />);
+    const q = [...container.querySelectorAll('.faq-question')].find((b) => /premium plan/i.test(b.textContent));
+    const answer = document.getElementById(q.getAttribute("aria-controls")).textContent;
+    expect(answer).toMatch(/website/i);
+    expect(answer).toMatch(/iPhone and Android apps/);
+    const ld = container.querySelector('script[type="application/ld+json"]').textContent;
+    expect(ld).toMatch(/iPhone and Android apps/);
+  });
+
   it('is still hidden in the native apps (Apple 3.1.1: no promoting a tier with no in-app purchase)', () => {
     native = true;
     const { container } = render(<FaqScreen />);

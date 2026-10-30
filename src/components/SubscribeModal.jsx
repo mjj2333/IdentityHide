@@ -117,6 +117,9 @@ export default function SubscribeModal({ onClose, source = 'unknown' }) {
         <p className="confirm-message subscribe-sub">
           Unlimited AI tattoo removal, full 20-image batches, and no ads.
         </p>
+        <p className="subscribe-scope">
+          Premium works on this website, including when you add it to your home screen. It does not apply in the iPhone and Android apps yet.
+        </p>
 
         <div className="subscribe-plans" role="radiogroup" aria-label="Choose a plan">
           {PLANS.map((p) => {

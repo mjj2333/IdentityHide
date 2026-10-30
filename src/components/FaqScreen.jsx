@@ -41,9 +41,10 @@ const FAQ_DATA = [
               <li>Unlimited AI tattoo removal</li>
               <li>Batch processing of up to 20 photos at a time (free users can batch 3)</li>
             </ul>
+            <p>Premium works on this website, including when you add it to your home screen. It does not apply in the iPhone and Android apps yet.</p>
           </>
         ),
-        aHtml: '<p>The premium plan includes:</p><ul><li>No ads</li><li>Unlimited AI tattoo removal</li><li>Batch processing of up to 20 photos at a time (free users can batch 3)</li></ul>',
+        aHtml: '<p>The premium plan includes:</p><ul><li>No ads</li><li>Unlimited AI tattoo removal</li><li>Batch processing of up to 20 photos at a time (free users can batch 3)</li></ul><p>Premium works on this website, including when you add it to your home screen. It does not apply in the iPhone and Android apps yet.</p>',
       },
       {
         q: 'Is AI tattoo removal free?',

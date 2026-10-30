@@ -734,6 +734,12 @@ textarea:focus-visible,
   margin-bottom: 14px;
 }
 
+.subscribe-scope {
+  margin: -6px 0 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 .subscribe-plans {
   display: flex;
   flex-direction: column;
