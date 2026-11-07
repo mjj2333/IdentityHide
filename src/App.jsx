@@ -112,9 +112,13 @@ function ScreenRouter() {
   // Native only: initialize AdMob + run the UMP consent flow once at startup,
   // so the first rewarded request is fast. Dynamically imported so neither the
   // module nor the plugin enters the web bundle. Fire-and-forget.
+  // Skipped in ad-free (TestFlight) builds, which also skips the tracking prompt.
   useEffect(() => {
     if (!isNativeApp()) return;
-    import('./utils/admobAds').then((m) => m.initAdMob()).catch(() => {});
+    import('./utils/buildChannel')
+      .then(({ isAdFreeBuild }) => isAdFreeBuild())
+      .then((adFree) => (adFree ? null : import('./utils/admobAds').then((m) => m.initAdMob())))
+      .catch(() => {});
   }, []);
 
   // Push history state when screen changes (enables browser back button)

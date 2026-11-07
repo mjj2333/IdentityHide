@@ -47,3 +47,30 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
 }
+
+// The app's web view controller. Same as Capacitor's own, plus the app's
+// local plugins (Main.storyboard points here). Kept in this file so the Xcode
+// project needs no new file entries.
+class MainViewController: CAPBridgeViewController {
+    override open func capacitorDidLoad() {
+        bridge?.registerPluginInstance(BuildChannelPlugin())
+    }
+}
+
+// Tells the web app which channel this build was installed from, so
+// TestFlight builds can be ad-free for testers. TestFlight installs (and
+// Apple's review and sandbox installs) carry a sandbox App Store receipt;
+// App Store installs carry a production one.
+@objc(BuildChannelPlugin)
+public class BuildChannelPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "BuildChannelPlugin"
+    public let jsName = "BuildChannel"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "get", returnType: CAPPluginReturnPromise)
+    ]
+
+    @objc func get(_ call: CAPPluginCall) {
+        let isSandbox = Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
+        call.resolve(["channel": isSandbox ? "testflight" : "appstore"])
+    }
+}

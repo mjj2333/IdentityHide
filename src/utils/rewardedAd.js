@@ -53,10 +53,16 @@ export function showRewardedAd() {
 
   // Native shells serve AdMob rewarded video instead of AppLixir. The module
   // (and the AdMob plugin) is dynamically imported so it never enters the web
-  // bundle, and returns the same { completed, reason } shape.
+  // bundle, and returns the same { completed, reason } shape. TestFlight
+  // builds are ad-free: the ad is skipped and the reward granted, so testers
+  // keep the same free-tier limits without watching ads.
   if (isNativeApp()) {
-    return import('./admobAds')
-      .then((m) => m.showAdMobRewarded())
+    return import('./buildChannel')
+      .then(async ({ isAdFreeBuild }) => {
+        if (await isAdFreeBuild()) return { completed: true, reason: 'ad-free-build' };
+        const m = await import('./admobAds');
+        return m.showAdMobRewarded();
+      })
       .catch(() => ({ completed: false, reason: 'no-sdk' }));
   }
 
