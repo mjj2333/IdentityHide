@@ -16,6 +16,7 @@ import RedeemCodeModal from './RedeemCodeModal';
 import SubscribeModal from './SubscribeModal';
 import ScreenShell from './ScreenShell';
 import { isNativeApp } from '../utils/platform';
+import { useBatchLimit } from '../hooks/useBatchLimit';
 import '../styles/BatchGrid.css';
 
 function makeId() {
@@ -51,7 +52,7 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
   const [showSubscribe, setShowSubscribe] = useState(false);
   // Free tier: batches are capped at 3 images (Premium: 20). Enforced at
   // add time; BatchContext's own hard cap of 20 stays as the upper bound.
-  const batchCap = premium ? 20 : 3;
+  const { limit: batchCap, full: fullBatches } = useBatchLimit();
   // Guards the rewarded-ad await in startProcessing — processAbortRef only
   // flips once processing actually starts, so a double-tap during the ad
   // would otherwise start a second ad.
@@ -216,8 +217,8 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
       warnings.push(`${oversized.length} file${oversized.length > 1 ? 's' : ''} over 50 MB skipped`);
     }
     if (validFiles.length > remaining) {
-      warnings.push(premium
-        ? `max 20 images (added ${toAdd.length}, skipped ${validFiles.length - remaining})`
+      warnings.push(fullBatches
+        ? `max ${batchCap} images (added ${toAdd.length}, skipped ${validFiles.length - remaining})`
         : `free batches are capped at ${batchCap} images (added ${toAdd.length}, skipped ${validFiles.length - remaining})`);
     }
     if (warnings.length > 0) {
@@ -240,7 +241,7 @@ export default function BatchGridScreen({ onBack, onExport, onEditImage }) {
 
     addImages(entries, batchCap);
     track('batch_images_added', { count: entries.length, total: images.length + entries.length });
-  }, [images.length, addImages, setWarning, batchCap, premium]);
+  }, [images.length, addImages, setWarning, batchCap, fullBatches]);
 
   const handleRemove = useCallback((e, id) => {
     e.stopPropagation();

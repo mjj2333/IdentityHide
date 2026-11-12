@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { usePipeline } from '../context/PipelineContext';
 import { useBatch } from '../context/BatchContext';
-import { useEntitlement } from '../context/EntitlementContext';
 import { useImagePipeline } from '../hooks/useImagePipeline';
 import { useCoachMarks, suppressAllWalkthroughs, resetWalkthrough } from '../hooks/useCoachMarks';
 import CoachMark from './CoachMark';
@@ -13,6 +12,7 @@ import { takeNativePhoto } from '../utils/nativeMedia';
 import { useDocumentMeta } from '../hooks/useDocumentMeta';
 import { getSessionInfo, loadSession, clearSession } from '../utils/sessionStore';
 import TipsToggle from './TipsToggle';
+import { useBatchLimit } from '../hooks/useBatchLimit';
 import '../styles/DropZone.css';
 
 // Format ms delta as a terse relative time for the restore banner.
@@ -84,7 +84,7 @@ export default function DropZone() {
   const [dragActive, setDragActive] = useState(false);
   const [savedSession, setSavedSession] = useState(null);
   const [restoring, setRestoring] = useState(false);
-  const { premium } = useEntitlement();
+  const { limit: batchLimit, full: fullBatches } = useBatchLimit();
 
   // Pending upload — set when the user picks a file but hasn't yet chosen
   // a resolution tier. Holds { file, width, height } while the modal is open.
@@ -142,12 +142,12 @@ export default function DropZone() {
   const handleMultipleFiles = useCallback((files) => {
     const imageFiles = files.filter(f => f.type.startsWith('image/') && f.size <= MAX_FILE_SIZE);
     if (imageFiles.length === 0) return;
-    // Free tier caps a batch at 3 images; premium at 20.
-    const cap = premium ? 20 : 3;
+    // Free tier caps a batch at 3 images; premium (and TestFlight testers) at 20.
+    const cap = batchLimit;
     const capped = imageFiles.slice(0, cap);
     if (imageFiles.length > cap) {
-      setWarning(premium
-        ? 'Maximum 20 images per batch. First 20 selected.'
+      setWarning(fullBatches
+        ? `Maximum ${cap} images per batch. First ${cap} selected.`
         : isNativeApp()
           ? `Free batches are capped at ${cap} images. First ${cap} selected.`
           : `Free batches are capped at ${cap} images. First ${cap} selected. Go Premium for up to 20.`);
@@ -155,7 +155,7 @@ export default function DropZone() {
     track('batch_upload', { count: capped.length });
     seedFiles(capped, cap);
     setScreen('batch-grid');
-  }, [seedFiles, setScreen, setWarning, MAX_FILE_SIZE, premium]);
+  }, [seedFiles, setScreen, setWarning, MAX_FILE_SIZE, batchLimit, fullBatches]);
 
   const handleFile = useCallback(async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
